@@ -53,6 +53,24 @@ export interface ImportJobConfig {
 }
 
 /**
+ * 缓存配置
+ */
+export interface CacheConfig {
+	/**
+	 * 缓存 TTL（毫秒），默认 5000ms
+	 */
+	cacheTtlMs?: number;
+	/**
+	 * 进度缓存 TTL（毫秒），默认 2000ms（更短的 TTL 以实时反映进度）
+	 */
+	progressCacheTtlMs?: number;
+	/**
+	 * 状态检查间隔批次，默认每 10 批检查一次状态
+	 */
+	statusCheckIntervalBatches?: number;
+}
+
+/**
  * 批处理数据项
  */
 export interface BatchDataItem {
@@ -125,6 +143,11 @@ interface JobStatusCacheEntry {
 	expiresAt: number;
 }
 
+interface JobProgressCacheEntry {
+	progress: ImportProgress;
+	expiresAt: number;
+}
+
 interface JobPerformanceMetrics {
 	startTime: number;
 	batchTimes: number[];
@@ -137,6 +160,10 @@ interface JobPerformanceMetrics {
 		duration: number;
 		itemCount: number;
 	}[];
+	progressCacheHits: number;
+	progressCacheMisses: number;
+	configCacheHits: number;
+	configCacheMisses: number;
 }
 
 /**
@@ -149,17 +176,25 @@ export class ImportJobRunner {
 	private maxConcurrentJobs: number = 3;
 	private processingCount: number = 0;
 	private taskStatusCache: Map<number, JobStatusCacheEntry> = new Map();
-	private readonly cacheTtlMs: number = 5000;
-	private readonly statusCheckIntervalBatches: number = 10;
+	private taskProgressCache: Map<number, JobProgressCacheEntry> = new Map();
+	private jobConfigCache: Map<number, { config: any; expiresAt: number }> = new Map();
+	private readonly cacheTtlMs: number;
+	private readonly progressCacheTtlMs: number;
+	private readonly statusCheckIntervalBatches: number;
 
 	// 性能监控
 	private performanceMetrics: Map<number, JobPerformanceMetrics> = new Map();
 
-	constructor(database: Knex, maxConcurrentJobs?: number) {
+	constructor(database: Knex, maxConcurrentJobs?: number, cacheConfig?: CacheConfig) {
 		this.database = database;
 		if (maxConcurrentJobs) {
 			this.maxConcurrentJobs = maxConcurrentJobs;
 		}
+
+		// 应用缓存配置
+		this.cacheTtlMs = cacheConfig?.cacheTtlMs ?? 5000;
+		this.progressCacheTtlMs = cacheConfig?.progressCacheTtlMs ?? 2000;
+		this.statusCheckIntervalBatches = cacheConfig?.statusCheckIntervalBatches ?? 10;
 	}
 
 	/**
@@ -284,6 +319,9 @@ export class ImportJobRunner {
 						has_errors: failedRows > 0,
 						estimated_completion_at: estimatedTimeRemaining,
 					});
+
+				// 使进度缓存失效
+				this.taskProgressCache.delete(jobId);
 
 				// 触发进度回调
 				if (onProgress) {
@@ -586,9 +624,30 @@ export class ImportJobRunner {
 	}
 
 	/**
-	 * 获取任务进度
+	 * 获取任务进度（带缓存）
 	 */
-	async getJobProgress(jobId: number): Promise<ImportProgress> {
+	async getJobProgress(jobId: number, useCache: boolean = true): Promise<ImportProgress> {
+		const metrics = this.performanceMetrics.get(jobId);
+		const lookupStartedAt = Date.now();
+
+		// 尝试从缓存获取
+		if (useCache) {
+			const cachedProgress = this.taskProgressCache.get(jobId);
+			const now = Date.now();
+
+			if (cachedProgress && cachedProgress.expiresAt > now) {
+				if (metrics) {
+					metrics.progressCacheHits++;
+				}
+				return cachedProgress.progress;
+			}
+
+			if (metrics) {
+				metrics.progressCacheMisses++;
+			}
+		}
+
+		// 从数据库获取
 		const job = await this.database('bt_import_jobs')
 			.where('id', jobId)
 			.first();
@@ -601,7 +660,7 @@ export class ImportJobRunner {
 		const processedRows = job.processed_rows || 0;
 		const progress = totalRows > 0 ? (processedRows / totalRows) * 100 : 0;
 
-		return {
+		const result: ImportProgress = {
 			jobId,
 			status: job.status as ImportJobStatus,
 			totalRows,
@@ -612,6 +671,16 @@ export class ImportJobRunner {
 			estimatedCompletionAt: job.estimated_completion_at,
 			errorSummary: job.error_summary || undefined,
 		};
+
+		// 缓存结果
+		if (useCache) {
+			this.taskProgressCache.set(jobId, {
+				progress: result,
+				expiresAt: Date.now() + this.progressCacheTtlMs,
+			});
+		}
+
+		return result;
 	}
 
 	/**
@@ -820,24 +889,55 @@ export class ImportJobRunner {
 
 	getCacheMetrics(
 		jobId: number
-	): { hitRate: number; hits: number; misses: number; averageLookupTime: number; statusChecks: number } | undefined {
+	): {
+		hitRate: number;
+		hits: number;
+		misses: number;
+		averageLookupTime: number;
+		statusChecks: number;
+		progressHitRate: number;
+		progressHits: number;
+		progressMisses: number;
+		configHitRate: number;
+		configHits: number;
+		configMisses: number;
+		totalHitRate: number;
+		totalHits: number;
+		totalMisses: number;
+	} | undefined {
 		const metrics = this.performanceMetrics.get(jobId);
 		if (!metrics) {
 			return undefined;
 		}
 
-		const lookups = metrics.cacheHits + metrics.cacheMisses;
+		const statusLookups = metrics.cacheHits + metrics.cacheMisses;
 		const averageLookupTime =
 			metrics.cacheCheckTimes.length > 0
 				? metrics.cacheCheckTimes.reduce((sum, time) => sum + time, 0) / metrics.cacheCheckTimes.length
 				: 0;
 
+		const progressLookups = metrics.progressCacheHits + metrics.progressCacheMisses;
+		const configLookups = metrics.configCacheHits + metrics.configCacheMisses;
+
+		const totalHits = metrics.cacheHits + metrics.progressCacheHits + metrics.configCacheHits;
+		const totalMisses = metrics.cacheMisses + metrics.progressCacheMisses + metrics.configCacheMisses;
+		const totalLookups = totalHits + totalMisses;
+
 		return {
-			hitRate: lookups > 0 ? metrics.cacheHits / lookups : 0,
+			hitRate: statusLookups > 0 ? metrics.cacheHits / statusLookups : 0,
 			hits: metrics.cacheHits,
 			misses: metrics.cacheMisses,
 			averageLookupTime: Math.round(averageLookupTime),
 			statusChecks: metrics.statusChecks,
+			progressHitRate: progressLookups > 0 ? metrics.progressCacheHits / progressLookups : 0,
+			progressHits: metrics.progressCacheHits,
+			progressMisses: metrics.progressCacheMisses,
+			configHitRate: configLookups > 0 ? metrics.configCacheHits / configLookups : 0,
+			configHits: metrics.configCacheHits,
+			configMisses: metrics.configCacheMisses,
+			totalHitRate: totalLookups > 0 ? totalHits / totalLookups : 0,
+			totalHits,
+			totalMisses,
 		};
 	}
 
@@ -848,6 +948,8 @@ export class ImportJobRunner {
 		this.activeJobs.delete(jobId);
 		this.performanceMetrics.delete(jobId);
 		this.clearJobStatusCache(jobId);
+		this.taskProgressCache.delete(jobId);
+		this.jobConfigCache.delete(jobId);
 	}
 
 	/**
@@ -855,6 +957,48 @@ export class ImportJobRunner {
 	 */
 	getActiveJobCount(): number {
 		return Array.from(this.activeJobs.values()).filter((active) => active).length;
+	}
+
+	/**
+	 * 获取任务配置（带缓存）
+	 */
+	private async getCachedJobConfig(jobId: number): Promise<any> {
+		const metrics = this.performanceMetrics.get(jobId);
+		const cachedConfig = this.jobConfigCache.get(jobId);
+		const now = Date.now();
+
+		if (cachedConfig && cachedConfig.expiresAt > now) {
+			if (metrics) {
+				metrics.configCacheHits++;
+			}
+			return cachedConfig.config;
+		}
+
+		if (metrics) {
+			metrics.configCacheMisses++;
+		}
+
+		const job = await this.database('bt_import_jobs')
+			.where('id', jobId)
+			.first();
+
+		if (!job) {
+			throw new Error(`任务不存在: ${jobId}`);
+		}
+
+		const config = {
+			batchSize: job.batch_size || 1000,
+			sheetName: job.sheet_name,
+			totalRows: job.total_rows,
+			status: job.status,
+		};
+
+		this.jobConfigCache.set(jobId, {
+			config,
+			expiresAt: Date.now() + this.cacheTtlMs,
+		});
+
+		return config;
 	}
 
 	/**
@@ -873,6 +1017,10 @@ export class ImportJobRunner {
 			statusChecks: 0,
 			cacheCheckTimes: [],
 			batchInsertMetrics: [],
+			progressCacheHits: 0,
+			progressCacheMisses: 0,
+			configCacheHits: 0,
+			configCacheMisses: 0,
 		};
 	}
 
@@ -934,17 +1082,21 @@ export class ImportJobRunner {
 			return;
 		}
 
-		if (cacheMetrics.statusChecks > 0) {
+		if (cacheMetrics.statusChecks > 0 || cacheMetrics.progressHits > 0 || cacheMetrics.configHits > 0) {
 			console.info(
-				`[ImportJobRunner] job=${jobId} cache hit rate=${Math.round(cacheMetrics.hitRate * 100)}% ` +
-					`hits=${cacheMetrics.hits} misses=${cacheMetrics.misses} statusChecks=${cacheMetrics.statusChecks}`
+				`[ImportJobRunner] job=${jobId} 缓存性能报告:\n` +
+					`  状态缓存: 命中率=${Math.round(cacheMetrics.hitRate * 100)}% 命中=${cacheMetrics.hits} 未命中=${cacheMetrics.misses}\n` +
+					`  进度缓存: 命中率=${Math.round(cacheMetrics.progressHitRate * 100)}% 命中=${cacheMetrics.progressHits} 未命中=${cacheMetrics.progressMisses}\n` +
+					`  配置缓存: 命中率=${Math.round(cacheMetrics.configHitRate * 100)}% 命中=${cacheMetrics.configHits} 未命中=${cacheMetrics.configMisses}\n` +
+					`  总体缓存: 命中率=${Math.round(cacheMetrics.totalHitRate * 100)}% 总命中=${cacheMetrics.totalHits} 总未命中=${cacheMetrics.totalMisses}\n` +
+					`  平均查找时间: ${cacheMetrics.averageLookupTime}ms 状态检查次数: ${cacheMetrics.statusChecks}`
 			);
 		}
 
-		if (cacheMetrics.statusChecks > 0 && cacheMetrics.hitRate < 0.5) {
+		if (cacheMetrics.totalHits + cacheMetrics.totalMisses > 0 && cacheMetrics.totalHitRate < 0.5) {
 			console.warn(
-				`[ImportJobRunner] job=${jobId} cache hit rate is below expectation: ${Math.round(
-					cacheMetrics.hitRate * 100
+				`[ImportJobRunner] job=${jobId} 缓存命中率低于预期: ${Math.round(
+					cacheMetrics.totalHitRate * 100
 				)}%`
 			);
 		}
