@@ -14,12 +14,12 @@
 			</template>
 
 			<template #actions>
-				<v-button v-tooltip="'预览变更'" rounded icon @click="handlePreview" :disabled="!hasChanges">
+				<v-button v-tooltip="'预览变更'" rounded icon @click="handlePreview" :disabled="!hasChanges || loading">
 					<template #icon>
 						<v-icon name="visibility" />
 					</template>
 				</v-button>
-				<v-button v-tooltip="'保存权限'" rounded icon @click="handleSave" :disabled="!hasChanges || saving">
+				<v-button v-tooltip="'保存权限'" rounded icon @click="handleSave" :disabled="!hasChanges || saving || loading">
 					<template #icon>
 						<v-icon name="save" />
 					</template>
@@ -40,6 +40,7 @@
 							placeholder="搜索用户名或邮箱..."
 							clearable
 							@update:model-value="handleSearch"
+							:disabled="loading"
 						>
 							<template #prepend>
 								<v-icon name="search" />
@@ -54,6 +55,7 @@
 							placeholder="筛选角色"
 							clearable
 							@update:model-value="handleFilter"
+							:disabled="loading"
 						/>
 					</div>
 
@@ -64,6 +66,7 @@
 							placeholder="筛选数据集"
 							clearable
 							@update:model-value="handleFilter"
+							:disabled="loading"
 						/>
 					</div>
 
@@ -71,17 +74,40 @@
 						<v-button @click="selectAllOnPage" :disabled="loading">
 							全选当前页
 						</v-button>
-						<v-button @click="clearAllSelections" :disabled="loading">
+						<v-button @click="clearAllSelections" :disabled="loading || selectedPermissions.size === 0">
 							清空选择
 						</v-button>
-						<v-button @click="showBatchGrantDialog = true" :disabled="selectedPermissions.size === 0">
+						<v-button @click="showBatchGrantDialog = true" :disabled="selectedPermissions.size === 0 || loading">
 							批量授权 ({{ selectedPermissions.size }})
 						</v-button>
 					</div>
 				</div>
 
+				<!-- 错误提示 -->
+				<v-notice v-if="error" type="danger" class="error-notice">
+					<div class="error-content">
+						<div class="error-message">
+							<v-icon name="error" class="error-icon" />
+							<span>{{ error.message }}</span>
+						</div>
+						<v-button small @click="retryLastOperation" :loading="retrying">
+							重试
+						</v-button>
+					</div>
+				</v-notice>
+
+				<!-- 加载状态 - 骨架屏 -->
+				<div v-if="loading && !error" class="skeleton-container">
+					<div v-for="i in 5" :key="i" class="skeleton-row">
+						<div class="skeleton-cell skeleton-user"></div>
+						<div class="skeleton-cell skeleton-checkbox"></div>
+						<div class="skeleton-cell skeleton-checkbox"></div>
+						<div v-for="j in activeDatasets.length" :key="j" class="skeleton-cell skeleton-checkbox"></div>
+					</div>
+				</div>
+
 				<!-- 权限矩阵 -->
-				<div v-if="!loading && paginatedUsers.length > 0" class="permission-matrix">
+				<div v-else-if="paginatedUsers.length > 0" class="permission-matrix">
 					<v-table
 						fixed-header
 						show-sort
@@ -145,11 +171,21 @@
 					</v-table>
 				</div>
 
-				<v-progress-circular v-else-if="loading" indeterminate />
-
-				<v-notice v-else type="info">
-					暂无用户数据
-				</v-notice>
+				<!-- 空状态 -->
+				<div v-else class="empty-state">
+					<v-icon :name="emptyStateIcon" class="empty-icon" />
+					<h3 class="empty-title">{{ emptyStateTitle }}</h3>
+					<p class="empty-description">{{ emptyStateDescription }}</p>
+					<v-button v-if="searchTerm || roleFilter || datasetFilter" @click="clearFilters">
+						清除筛选条件
+					</v-button>
+					<v-button v-else-if="!error" @click="refreshData" :loading="loading">
+						<template #prepend>
+							<v-icon name="refresh" />
+						</template>
+						刷新数据
+					</v-button>
+				</div>
 
 				<!-- 分页 -->
 				<div v-if="!loading && filteredUsers.length > 0" class="pagination">
@@ -170,6 +206,24 @@
 						/>
 					</div>
 				</div>
+
+				<!-- 变更提示 -->
+				<v-slide-y-transition>
+					<div v-if="hasChanges && !showConfirmDialog" class="changes-pending-bar">
+						<div class="changes-pending-content">
+							<v-icon name="info" class="changes-icon" />
+							<span class="changes-text">您有 {{ pendingChanges.size }} 条权限变更待保存</span>
+							<div class="changes-actions">
+								<v-button small secondary @click="discardChanges">
+									放弃变更
+								</v-button>
+								<v-button small @click="handleSave">
+									立即保存
+								</v-button>
+							</div>
+						</div>
+					</div>
+				</v-slide-y-transition>
 
 				<div v-if="hasBatchFeedback" class="batch-feedback-panel">
 					<div class="batch-feedback-header">
@@ -270,7 +324,10 @@
 							</v-notice>
 						</div>
 					</div>
-					<v-progress-circular v-else-if="previewLoading" indeterminate />
+					<div v-else-if="previewLoading" class="preview-loading">
+						<v-progress-circular indeterminate />
+						<p>正在生成预览...</p>
+					</div>
 				</v-card-text>
 				<v-card-actions>
 					<v-button @click="showPreviewDialog = false">关闭</v-button>
@@ -303,6 +360,28 @@
 						@click="executeSave"
 					>
 						确认变更
+					</v-button>
+				</v-card-actions>
+			</v-card>
+		</v-dialog>
+
+		<!-- 确认放弃变更对话框 -->
+		<v-dialog v-model="showDiscardDialog">
+			<v-card>
+				<v-card-title>确认放弃变更</v-card-title>
+				<v-card-text>
+					<p>您即将放弃 <strong>{{ pendingChanges.size }}</strong> 条未保存的权限变更。</p>
+					<v-notice type="warning">
+						此操作不可撤销，所有未保存的变更将会丢失。
+					</v-notice>
+				</v-card-text>
+				<v-card-actions>
+					<v-button @click="showDiscardDialog = false">取消</v-button>
+					<v-button
+						color="danger"
+						@click="confirmDiscardChanges"
+					>
+						确认放弃
 					</v-button>
 				</v-card-actions>
 			</v-card>
@@ -402,6 +481,11 @@ interface TableColumn {
 	sortable?: boolean;
 }
 
+interface ErrorState {
+	message: string;
+	operation?: string;
+}
+
 const api = useApi();
 
 const users = ref<User[]>([]);
@@ -413,6 +497,9 @@ const loading = ref(false);
 const saving = ref(false);
 const previewLoading = ref(false);
 const batchProcessing = ref(false);
+const retrying = ref(false);
+const error = ref<ErrorState | null>(null);
+const lastFailedOperation = ref<(() => Promise<void>) | null>(null);
 
 const searchTerm = ref('');
 const roleFilter = ref<string | null>(null);
@@ -423,6 +510,7 @@ const itemsPerPage = ref(50);
 const showBatchGrantDialog = ref(false);
 const showPreviewDialog = ref(false);
 const showConfirmDialog = ref(false);
+const showDiscardDialog = ref(false);
 const showBatchDetailsDialog = ref(false);
 const previewData = ref<any>(null);
 
@@ -539,6 +627,24 @@ const batchChangesSummary = computed(() => {
 	);
 });
 
+const emptyStateTitle = computed(() => {
+	if (error.value) return '加载失败';
+	if (searchTerm.value || roleFilter.value || datasetFilter.value) return '未找到匹配的用户';
+	return '暂无用户数据';
+});
+
+const emptyStateDescription = computed(() => {
+	if (error.value) return error.value.message;
+	if (searchTerm.value || roleFilter.value || datasetFilter.value) return '请尝试调整筛选条件或清除筛选';
+	return '系统中还没有用户，请先创建用户';
+});
+
+const emptyStateIcon = computed(() => {
+	if (error.value) return 'error_outline';
+	if (searchTerm.value || roleFilter.value || datasetFilter.value) return 'search_off';
+	return 'inbox';
+});
+
 const fetchUsers = async () => {
 	try {
 		const response = await api.get('/users', {
@@ -551,9 +657,8 @@ const fetchUsers = async () => {
 		if (response.data && Array.isArray(response.data.data)) {
 			users.value = response.data.data;
 		}
-	} catch (error) {
-		console.error('获取用户列表失败:', error);
-		showToast('获取用户列表失败', 'error');
+	} catch (err: any) {
+		throw new Error(`获取用户列表失败: ${err.message || '未知错误'}`);
 	}
 };
 
@@ -569,9 +674,8 @@ const fetchDatasets = async () => {
 		if (response.data && Array.isArray(response.data.data)) {
 			datasets.value = response.data.data;
 		}
-	} catch (error) {
-		console.error('获取数据集列表失败:', error);
-		showToast('获取数据集列表失败', 'error');
+	} catch (err: any) {
+		throw new Error(`获取数据集列表失败: ${err.message || '未知错误'}`);
 	}
 };
 
@@ -582,9 +686,8 @@ const fetchCurrentPermissions = async () => {
 		if (response.data && Array.isArray(response.data.data)) {
 			currentPermissions.value = response.data.data;
 		}
-	} catch (error) {
-		console.error('获取当前权限失败:', error);
-		currentPermissions.value = [];
+	} catch (err: any) {
+		throw new Error(`获取当前权限失败: ${err.message || '未知错误'}`);
 	}
 };
 
@@ -806,9 +909,9 @@ const handlePreview = async () => {
 		if (response.data && response.data.success) {
 			previewData.value = response.data.data;
 		}
-	} catch (error) {
-		console.error('预览失败:', error);
-		showToast('预览失败', 'error');
+	} catch (err: any) {
+		console.error('预览失败:', err);
+		showToast(`预览失败: ${err.message || '未知错误'}`, 'error');
 		showPreviewDialog.value = false;
 	} finally {
 		previewLoading.value = false;
@@ -827,6 +930,7 @@ const confirmSave = async () => {
 
 const executeSave = async () => {
 	saving.value = true;
+	error.value = null;
 
 	try {
 		const requestData = {
@@ -841,13 +945,53 @@ const executeSave = async () => {
 			clearBatchFeedback();
 			await fetchCurrentPermissions();
 		}
-	} catch (error) {
-		console.error('保存失败:', error);
+	} catch (err: any) {
+		console.error('保存失败:', err);
+		error.value = {
+			message: err.response?.data?.errors?.[0]?.message || err.message || '保存失败，请稍后重试',
+			operation: 'save'
+		};
+		lastFailedOperation.value = executeSave;
 		showToast('保存失败', 'error');
 	} finally {
 		saving.value = false;
 		showConfirmDialog.value = false;
 	}
+};
+
+const discardChanges = () => {
+	if (!hasChanges.value) return;
+	showDiscardDialog.value = true;
+};
+
+const confirmDiscardChanges = () => {
+	permissionChanges.value.clear();
+	clearBatchFeedback();
+	showDiscardDialog.value = false;
+	showToast('已放弃所有未保存的变更', 'info');
+};
+
+const retryLastOperation = async () => {
+	if (!lastFailedOperation.value) return;
+
+	retrying.value = true;
+	error.value = null;
+
+	try {
+		await lastFailedOperation.value();
+		lastFailedOperation.value = null;
+	} catch (err) {
+		// Error will be set by the failed operation
+	} finally {
+		retrying.value = false;
+	}
+};
+
+const clearFilters = () => {
+	searchTerm.value = '';
+	roleFilter.value = null;
+	datasetFilter.value = null;
+	currentPage.value = 1;
 };
 
 const handleSearch = () => {
@@ -883,6 +1027,8 @@ const handleBatchDetailsDialogClose = (value: boolean) => {
 
 const refreshData = async () => {
 	loading.value = true;
+	error.value = null;
+
 	try {
 		await Promise.all([
 			fetchUsers(),
@@ -890,7 +1036,12 @@ const refreshData = async () => {
 			fetchCurrentPermissions()
 		]);
 		showToast('数据已刷新', 'success');
-	} catch (error) {
+	} catch (err: any) {
+		error.value = {
+			message: err.message || '加载数据失败',
+			operation: 'refresh'
+		};
+		lastFailedOperation.value = refreshData;
 		showToast('刷新失败', 'error');
 	} finally {
 		loading.value = false;
@@ -911,13 +1062,20 @@ const showToast = (message: string, type: 'success' | 'error' | 'warning' | 'inf
 
 onMounted(async () => {
 	loading.value = true;
+	error.value = null;
+
 	try {
 		await Promise.all([
 			fetchUsers(),
 			fetchDatasets(),
 			fetchCurrentPermissions()
 		]);
-	} catch (error) {
+	} catch (err: any) {
+		error.value = {
+			message: err.message || '加载数据失败',
+			operation: 'load'
+		};
+		lastFailedOperation.value = refreshData;
 		showToast('加载数据失败', 'error');
 	} finally {
 		loading.value = false;
@@ -964,6 +1122,147 @@ onBeforeUnmount(() => {
 }
 
 .batch-actions {
+	display: flex;
+	gap: 8px;
+}
+
+.error-notice {
+	width: 100%;
+}
+
+.error-content {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 16px;
+}
+
+.error-message {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex: 1;
+}
+
+.error-icon {
+	color: var(--theme--danger);
+}
+
+/* 骨架屏样式 */
+.skeleton-container {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	padding: 16px;
+	background: var(--theme--background);
+	border-radius: 8px;
+}
+
+.skeleton-row {
+	display: flex;
+	gap: 12px;
+	align-items: center;
+	padding: 12px 0;
+	border-bottom: 1px solid var(--theme--border-subdued);
+}
+
+.skeleton-cell {
+	border-radius: 6px;
+	animation: skeleton-loading 1.5s ease-in-out infinite;
+	background: linear-gradient(
+		90deg,
+		var(--theme--background-subdued) 0%,
+		var(--theme--background-subdued) 40%,
+		var(--theme--border-subdued) 50%,
+		var(--theme--background-subdued) 60%,
+		var(--theme--background-subdued) 100%
+	);
+	background-size: 200% 100%;
+}
+
+@keyframes skeleton-loading {
+	0% {
+		background-position: 200% 0;
+	}
+	100% {
+		background-position: -200% 0;
+	}
+}
+
+.skeleton-user {
+	width: 250px;
+	height: 48px;
+}
+
+.skeleton-checkbox {
+	width: 80px;
+	height: 32px;
+}
+
+/* 空状态样式 */
+.empty-state {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	padding: 60px 20px;
+	text-align: center;
+	background: var(--theme--background);
+	border-radius: 8px;
+}
+
+.empty-icon {
+	width: 64px;
+	height: 64px;
+	color: var(--theme--foreground-subdued);
+	margin-bottom: 16px;
+	opacity: 0.5;
+}
+
+.empty-title {
+	font-size: 1.1rem;
+	font-weight: 600;
+	color: var(--theme--foreground);
+	margin: 0 0 8px 0;
+}
+
+.empty-description {
+	font-size: 0.9rem;
+	color: var(--theme--foreground-subdued);
+	margin: 0 0 24px 0;
+	max-width: 400px;
+}
+
+/* 变更提示栏 */
+.changes-pending-bar {
+	position: sticky;
+	bottom: 0;
+	z-index: 20;
+	background: var(--theme--primary-background);
+	border: 1px solid var(--theme--primary);
+	border-radius: 12px;
+	box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.changes-pending-content {
+	display: flex;
+	align-items: center;
+	gap: 16px;
+	padding: 14px 20px;
+}
+
+.changes-icon {
+	color: var(--theme--primary);
+	flex-shrink: 0;
+}
+
+.changes-text {
+	flex: 1;
+	font-weight: 500;
+	color: var(--theme--foreground);
+}
+
+.changes-actions {
 	display: flex;
 	gap: 8px;
 }
@@ -1180,6 +1479,14 @@ onBeforeUnmount(() => {
 	gap: 8px;
 }
 
+.preview-loading {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 16px;
+	padding: 20px;
+}
+
 .preview-conflicts {
 	display: flex;
 	flex-direction: column;
@@ -1255,6 +1562,19 @@ onBeforeUnmount(() => {
 	.batch-detail-header,
 	.batch-detail-row {
 		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+
+	.changes-pending-content {
+		flex-direction: column;
+		align-items: stretch;
+	}
+
+	.changes-actions {
+		width: 100%;
+	}
+
+	.changes-actions :deep(.v-button) {
+		flex: 1;
 	}
 }
 </style>
