@@ -76,7 +76,18 @@ export function registerRoutes(router: Router): void {
 	router.get(`${BASE_PATH}/preview`, async (req: Request, res: Response) => {
 		try {
 			// 从查询参数获取请求数据（支持 GET 请求）
-			const requestData = req.query.data ? JSON.parse(req.query.data as string) : {};
+			let requestData: any = {};
+			if (req.query.data) {
+				try {
+					requestData = JSON.parse(req.query.data as string);
+				} catch (e) {
+					const errorResponse: ApiErrorResponse = {
+						error: 'VALIDATION_ERROR',
+						message: '无效的 JSON 数据格式',
+					};
+					return res.status(400).json(errorResponse);
+				}
+			}
 
 			// 验证请求体
 			const validationErrors = validateSyncRequest(requestData);

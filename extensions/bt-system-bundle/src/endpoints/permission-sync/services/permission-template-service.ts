@@ -366,9 +366,10 @@ export class PermissionTemplateService {
 			throw new Error(`Sync log not found: ${syncLogId}`);
 		}
 
-		const permissionsBefore = syncLog.permissions_before
-			? JSON.parse(syncLog.permissions_before)
-			: [];
+		const permissionsBefore = this.parseJsonField<any[]>(
+			syncLog.permissions_before,
+			'permissions_before'
+		) ?? [];
 
 		try {
 			await this.database.transaction(async (trx) => {
@@ -447,9 +448,10 @@ export class PermissionTemplateService {
 		return logs.map((log) => ({
 			sync_log_id: log.id,
 			timestamp: log.created_at,
-			permissions_snapshot: log.permissions_before
-				? JSON.parse(log.permissions_before)
-				: [],
+			permissions_snapshot: this.parseJsonField<any[]>(
+				log.permissions_before,
+				'permissions_before'
+			) ?? [],
 			collection: log.collection_name,
 			role_id: log.role_id,
 		}));

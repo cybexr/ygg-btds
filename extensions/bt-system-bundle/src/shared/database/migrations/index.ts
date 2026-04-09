@@ -37,6 +37,9 @@ export interface MigrationFile {
 	sql: string;
 }
 
+import * as fs from 'fs';
+import * as path from 'path';
+
 /**
  * Load migration files from the migrations directory
  */
@@ -44,17 +47,36 @@ export async function loadMigrations(
 	migrationsPath: string,
 	databaseType: 'postgresql' | 'sqlite'
 ): Promise<MigrationFile[]> {
-	// This would typically use filesystem access
-	// For now, return the migration we created
-	const baseMigration = databaseType === 'postgresql'
-		? '001_create_registry.sql'
-		: '001_create_registry.sqlite.sql';
+	const files = fs.readdirSync(migrationsPath);
+	const migrations: MigrationFile[] = [];
 
-	return [{
-		name: baseMigration,
-		version: 1,
-		sql: '', // Will be loaded from filesystem
-	}];
+	for (const file of files) {
+		const isSqlite = file.endsWith('.sqlite.sql');
+		const isPostgres = file.endsWith('.sql') && !isSqlite;
+		
+		const shouldLoad = databaseType === 'postgresql' ? isPostgres : isSqlite;
+		
+		if (!shouldLoad && file !== 'validate.sql' && file !== 'validate.sqlite.sql') {
+			// Actually validate scripts might be loaded manually, but typical migrations start with numbers
+			// Let's filter for files matching the typical migration pattern like 001_xxx.sql
+		}
+
+		if (shouldLoad && /^\d+_/.test(file)) {
+			const versionMatch = file.match(/^(\d+)_/);
+			if (versionMatch) {
+				const version = parseInt(versionMatch[1], 10);
+				const content = fs.readFileSync(path.join(migrationsPath, file), 'utf8');
+				migrations.push({
+					name: file,
+					version,
+					sql: content
+				});
+			}
+		}
+	}
+
+	migrations.sort((a, b) => a.version - b.version);
+	return migrations;
 }
 
 /**
