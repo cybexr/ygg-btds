@@ -2,6 +2,7 @@ import { FullConfig } from '@playwright/test';
 import { execSync } from 'child_process';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import fs from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,7 +19,7 @@ async function globalSetup(config: FullConfig) {
   process.env.NODE_ENV = 'test';
 
   // 验证测试环境是否就绪
-  const baseURL = process.env.TEST_BASE_URL || 'http://localhost:8080';
+  const baseURL = process.env.TEST_BASE_URL || 'http://localhost:8055';
   console.log(`📡 Testing against: ${baseURL}`);
 
   // 等待测试服务就绪（最多等待 60 秒）
@@ -36,7 +37,7 @@ async function globalSetup(config: FullConfig) {
       if (i === maxRetries - 1) {
         throw new Error(
           `❌ Test environment not ready after ${maxRetries * retryDelay / 1000}s. ` +
-          'Make sure docker-compose.test.yml is running.'
+          'Make sure Directus is running with SQLite database.'
         );
       }
       console.log(`⏳ Waiting for test environment... (${i + 1}/${maxRetries})`);

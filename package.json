@@ -7,9 +7,8 @@
     "dev": "directus start",
     "test:e2e": "cd tests && npm run test:e2e",
     "test:e2e:install": "cd tests && npm install && npm run test:e2e:install",
-    "test:env:up": "docker-compose -f docker-compose.test.yml up -d",
-    "test:env:down": "docker-compose -f docker-compose.test.yml down",
-    "test:env:verify": "bash ./tests/scripts/verify-test-env.sh",
+    "test:setup": "node -e \"const fs=require('fs');fs.mkdirSync('./data',{recursive:true});\"",
+    "test:verify": "cd tests && npm run verify",
     "test:mock-data": "python3 ./tests/scripts/generate-mock-data.py"
   },
   "keywords": [

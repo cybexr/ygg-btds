@@ -45,7 +45,7 @@ export default defineConfig({
 
   use: {
     // 基础 URL（Directus 测试实例）
-    baseURL: process.env.TEST_BASE_URL || 'http://localhost:8080',
+    baseURL: process.env.TEST_BASE_URL || 'http://localhost:8055',
 
     // 追踪失败测试（重放时使用）
     trace: 'retain-on-failure',

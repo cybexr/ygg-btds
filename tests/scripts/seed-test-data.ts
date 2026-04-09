@@ -7,7 +7,7 @@
 import { createClient } from '@directus/sdk';
 
 // Directus 客户端配置
-const DIRECTUS_URL = process.env.DIRECTUS_URL || 'http://localhost:8080';
+const DIRECTUS_URL = process.env.DIRECTUS_URL || 'http://localhost:8055';
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@test.btdms.local';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin_test_password';
 

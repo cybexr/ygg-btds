@@ -3,5 +3,16 @@
 .agent/
 .claude/
 
-# ts
+# Dependencies
 node_modules/
+
+# SQLite 数据库文件
+*.db
+*.db-shm
+*.db-wal
+/data/
+
+# 测试相关
+test-results/
+/playwright-report/
+/tests/.env.test.local
