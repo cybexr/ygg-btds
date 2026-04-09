@@ -3,7 +3,6 @@
  * 提供权限同步和预览的 REST API 接口
  */
 
-import './express';
 import { Router, Request, Response } from 'express';
 import { PermissionSyncService } from './permission-sync-service';
 import {
