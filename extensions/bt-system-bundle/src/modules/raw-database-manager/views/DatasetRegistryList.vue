@@ -376,6 +376,9 @@ const fetchDatasets = async () => {
 };
 
 const toggleVisibility = async (dataset: Dataset) => {
+	if (!rowActionLoading.value[dataset.id]) rowActionLoading.value[dataset.id] = {};
+	rowActionLoading.value[dataset.id].visibility = true;
+	
 	const newStatus = dataset.status === 'active' ? 'hidden' : 'active';
 
 	try {
@@ -388,7 +391,23 @@ const toggleVisibility = async (dataset: Dataset) => {
 	} catch (error) {
 		console.error('更新状态失败:', error);
 		showToast('更新状态失败', 'error');
+	} finally {
+		if (rowActionLoading.value[dataset.id]) {
+			rowActionLoading.value[dataset.id].visibility = false;
+		}
 	}
+};
+
+const handleViewDetails = (dataset: Dataset) => {
+	if (!rowActionLoading.value[dataset.id]) rowActionLoading.value[dataset.id] = {};
+	rowActionLoading.value[dataset.id].view = true;
+	showToast('正在加载详情...', 'info');
+	
+	setTimeout(() => {
+		if (rowActionLoading.value[dataset.id]) {
+			rowActionLoading.value[dataset.id].view = false;
+		}
+	}, 1000);
 };
 
 const confirmTruncate = (dataset: Dataset) => {
