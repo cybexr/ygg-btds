@@ -64,6 +64,27 @@ validate_safe_path() {
     return 0
 }
 
+# 检测是否在 CI 环境
+is_ci_environment() {
+    # 检查常见的 CI 环境变量
+    if [[ -n "${CI:-}" ]] || \
+       [[ -n "${CONTINUOUS_INTEGRATION:-}" ]] || \
+       [[ -n "${GITHUB_ACTIONS:-}" ]] || \
+       [[ -n "${GITLAB_CI:-}" ]] || \
+       [[ -n "${JENKINS_URL:-}" ]] || \
+       [[ -n "${TRAVIS:-}" ]] || \
+       [[ -n "${CIRCLECI:-}" ]]; then
+        return 0
+    fi
+
+    # 检查是否在 TTY 中（非交互式环境）
+    if [[ ! -t 0 ]]; then
+        return 0
+    fi
+
+    return 1
+}
+
 # 帮助信息
 show_help() {
     echo "用法: ./test-env.sh [命令] [参数]"
@@ -78,6 +99,10 @@ show_help() {
     echo ""
     echo "环境变量:"
     echo "  CI        设置为任意值以跳过交互式确认（用于 CI/CD）"
+    echo ""
+    echo "自动检测:"
+    echo "  脚本会自动检测 CI 环境（GITHUB_ACTIONS, GITLAB_CI 等）"
+    echo "  和非 TTY 环境，在这些环境下会自动跳过确认提示"
     echo ""
 }
 
@@ -142,7 +167,7 @@ env_clean() {
     if [[ "$force_flag" == true ]]; then
         skip_confirmation=true
         echo -e "${YELLOW}ℹ️ 使用 --force 参数跳过确认${NC}"
-    elif [[ -n "${CI:-}" ]]; then
+    elif is_ci_environment; then
         skip_confirmation=true
         echo -e "${YELLOW}ℹ️ 检测到 CI 环境，自动跳过确认${NC}"
     fi
@@ -150,7 +175,7 @@ env_clean() {
     # 确认清理（除非在 CI 环境或使用了 --force）
     if [[ "$skip_confirmation" == false ]]; then
         echo -e "${RED}⚠️  警告: 这将删除所有测试数据${NC}"
-        read -p "确定要清理吗? (y/N): " -n 1 -r
+        read -p "确定要清理吗? (y/N): " -r
         echo
         if [[ ! $REPLY =~ ^[Yy]$ ]]; then
             echo -e "${YELLOW}❌ 已取消${NC}"
