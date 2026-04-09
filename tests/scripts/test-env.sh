@@ -66,14 +66,18 @@ validate_safe_path() {
 
 # 帮助信息
 show_help() {
-    echo "用法: ./test-env.sh [命令]"
+    echo "用法: ./test-env.sh [命令] [参数]"
     echo ""
     echo "命令:"
     echo "  setup     创建数据目录和 SQLite 数据库"
     echo "  verify    验证环境配置"
     echo "  clean     清理环境（删除数据库文件）"
+    echo "              选项: --force, -f  跳过确认直接清理"
     echo "  test      运行 E2E 测试"
     echo "  help      显示此帮助信息"
+    echo ""
+    echo "环境变量:"
+    echo "  CI        设置为任意值以跳过交互式确认（用于 CI/CD）"
     echo ""
 }
 
@@ -111,21 +115,53 @@ env_verify() {
 
 # 清理环境
 env_clean() {
-    # 验证 DB_DIR 路径安全性
+    local force_flag=false
+
+    # 解析参数
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --force|-f)
+                force_flag=true
+                shift
+                ;;
+            *)
+                echo -e "${RED}❌ 未知参数: $1${NC}" >&2
+                echo "用法: ./test-env.sh clean [--force|-f]"
+                exit 1
+                ;;
+        esac
+    done
+
+    # 验证 DB_DIR 路径安全性（始终执行，即使使用 --force）
     if ! validate_safe_path "$DB_DIR" "数据目录"; then
         exit 1
     fi
 
-    echo -e "${RED}⚠️  警告: 这将删除所有测试数据${NC}"
-    read -p "确定要清理吗? (y/N): " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        echo -e "${YELLOW}🧹 清理测试环境...${NC}"
-        rm -rf "$DB_DIR"
-        echo -e "${GREEN}✅ 测试环境已清理${NC}"
-    else
-        echo -e "${YELLOW}❌ 已取消${NC}"
+    # 检查是否在 CI 环境中或使用了 --force 参数
+    local skip_confirmation=false
+    if [[ "$force_flag" == true ]]; then
+        skip_confirmation=true
+        echo -e "${YELLOW}ℹ️ 使用 --force 参数跳过确认${NC}"
+    elif [[ -n "${CI:-}" ]]; then
+        skip_confirmation=true
+        echo -e "${YELLOW}ℹ️ 检测到 CI 环境，自动跳过确认${NC}"
     fi
+
+    # 确认清理（除非在 CI 环境或使用了 --force）
+    if [[ "$skip_confirmation" == false ]]; then
+        echo -e "${RED}⚠️  警告: 这将删除所有测试数据${NC}"
+        read -p "确定要清理吗? (y/N): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            echo -e "${YELLOW}❌ 已取消${NC}"
+            exit 0
+        fi
+    fi
+
+    # 执行清理
+    echo -e "${YELLOW}🧹 清理测试环境...${NC}"
+    rm -rf "$DB_DIR"
+    echo -e "${GREEN}✅ 测试环境已清理${NC}"
 }
 
 # 运行测试
@@ -160,7 +196,8 @@ case "${1:-help}" in
         env_verify
         ;;
     clean)
-        env_clean
+        shift
+        env_clean "$@"
         ;;
     test)
         shift
