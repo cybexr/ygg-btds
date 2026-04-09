@@ -26,6 +26,27 @@ export enum ImportJobStatus {
 }
 
 /**
+ * 合法的状态转换映射
+ * key: 当前状态, value: 允许的下一个状态列表
+ */
+const VALID_STATUS_TRANSITIONS: Record<ImportJobStatus, ImportJobStatus[]> = {
+	[ImportJobStatus.PENDING]: [ImportJobStatus.RUNNING, ImportJobStatus.CANCELLED],
+	[ImportJobStatus.RUNNING]: [ImportJobStatus.PAUSED, ImportJobStatus.COMPLETED, ImportJobStatus.FAILED, ImportJobStatus.CANCELLED],
+	[ImportJobStatus.PAUSED]: [ImportJobStatus.RUNNING, ImportJobStatus.CANCELLED],
+	[ImportJobStatus.COMPLETED]: [], // 终态，不允许转换
+	[ImportJobStatus.FAILED]: [], // 终态，不允许转换
+	[ImportJobStatus.CANCELLED]: [], // 终态，不允许转换
+};
+
+/**
+ * 验证状态转换是否合法
+ */
+function isValidStatusTransition(currentStatus: ImportJobStatus, newStatus: ImportJobStatus): boolean {
+	const validTransitions = VALID_STATUS_TRANSITIONS[currentStatus];
+	return validTransitions.includes(newStatus);
+}
+
+/**
  * 错误严重级别
  */
 export enum ErrorSeverity {
@@ -532,9 +553,33 @@ export class ImportJobRunner {
 	}
 
 	/**
-	 * 更新任务状态
+	 * 更新任务状态（带状态转换验证）
 	 */
 	private async updateJobStatus(jobId: number, status: ImportJobStatus): Promise<void> {
+		// 获取当前任务状态
+		const job = await this.database('bt_import_jobs')
+			.where('id', jobId)
+			.first();
+
+		if (!job) {
+			throw new Error(`任务不存在: ${jobId}`);
+		}
+
+		const currentStatus = job.status as ImportJobStatus;
+
+		// 验证状态转换是否合法
+		if (!isValidStatusTransition(currentStatus, status)) {
+			throw new Error(
+				`非法的状态转换: ${currentStatus} -> ${status}。` +
+				`允许的转换: ${VALID_STATUS_TRANSITIONS[currentStatus].join(', ') || '无（终态）'}`
+			);
+		}
+
+		// 记录状态转换日志（仅在状态实际变化时）
+		if (currentStatus !== status) {
+			console.debug(`[ImportJobRunner] 任务 ${jobId} 状态转换: ${currentStatus} -> ${status}`);
+		}
+
 		const updateData: any = { status };
 
 		if (status === ImportJobStatus.RUNNING) {
@@ -1207,5 +1252,19 @@ export class ImportJobRunner {
 			avgFallbackTime: Math.round(avgFallbackTime),
 			batchModeSuccessRate,
 		};
+	}
+
+	/**
+	 * 获取允许的状态转换列表（用于调试和错误报告）
+	 */
+	getValidStatusTransitions(currentStatus: ImportJobStatus): ImportJobStatus[] {
+		return [...VALID_STATUS_TRANSITIONS[currentStatus]];
+	}
+
+	/**
+	 * 检查状态转换是否合法（公共接口）
+	 */
+	canTransitionTo(currentStatus: ImportJobStatus, newStatus: ImportJobStatus): boolean {
+		return isValidStatusTransition(currentStatus, newStatus);
 	}
 }
