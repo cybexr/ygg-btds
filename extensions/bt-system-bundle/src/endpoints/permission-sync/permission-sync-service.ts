@@ -14,12 +14,55 @@ import {
 	PermissionTemplate,
 } from './types';
 import { getPermissionTemplate } from './templates';
+import type { RequestContext, UserInfo } from './express.d';
 
 export class PermissionSyncService {
 	private database: Knex;
+	private context?: RequestContext;
 
-	constructor(database: Knex) {
+	constructor(database: Knex, context?: RequestContext) {
 		this.database = database;
+		this.context = context;
+	}
+
+	/**
+	 * 获取当前用户信息
+	 */
+	getCurrentUser(): UserInfo | undefined {
+		return this.context?.user;
+	}
+
+	/**
+	 * 获取当前用户 ID
+	 */
+	getCurrentUserId(): string | undefined {
+		return this.context?.user?.id || this.context?.accountability?.user;
+	}
+
+	/**
+	 * 检查当前用户是否为管理员
+	 */
+	isAdmin(): boolean {
+		return this.context?.accountability?.admin === true ||
+		       this.context?.user?.admin === true;
+	}
+
+	/**
+	 * 验证用户是否有权限操作目标用户的权限配置
+	 */
+	async canModifyUserPermissions(targetUserId: string): Promise<boolean> {
+		// 管理员可以修改所有用户权限
+		if (this.isAdmin()) {
+			return true;
+		}
+
+		// 用户只能修改自己的权限配置
+		const currentUserId = this.getCurrentUserId();
+		if (currentUserId === targetUserId) {
+			return true;
+		}
+
+		return false;
 	}
 
 	/**

@@ -5,6 +5,7 @@
 
 import { Router, Request, Response } from 'express';
 import { PermissionSyncService } from './permission-sync-service';
+import type { RequestContext } from './express.d';
 import {
 	PermissionSyncRequest,
 	PermissionSyncResponse,
@@ -40,8 +41,8 @@ export function registerRoutes(router: Router): void {
 				return res.status(500).json(errorResponse);
 			}
 
-			// 创建服务实例
-			const syncService = new PermissionSyncService(database);
+			// 创建服务实例，传递上下文信息
+			const syncService = new PermissionSyncService(database, req.context);
 
 			// 执行权限同步
 			const syncRequest: PermissionSyncRequest = req.body;
@@ -109,8 +110,8 @@ export function registerRoutes(router: Router): void {
 				return res.status(500).json(errorResponse);
 			}
 
-			// 创建服务实例
-			const syncService = new PermissionSyncService(database);
+			// 创建服务实例，传递上下文信息
+			const syncService = new PermissionSyncService(database, req.context);
 
 			// 执行权限预览
 			const syncRequest: PermissionSyncRequest = {
@@ -161,8 +162,8 @@ export function registerRoutes(router: Router): void {
 				return res.status(500).json(errorResponse);
 			}
 
-			// 创建服务实例
-			const syncService = new PermissionSyncService(database);
+			// 创建服务实例，传递上下文信息
+			const syncService = new PermissionSyncService(database, req.context);
 
 			// 执行权限预览
 			const syncRequest: PermissionSyncRequest = {
