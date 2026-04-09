@@ -1,7 +1,7 @@
 <template>
 	<div class="dataset-registry-list">
 		<v-table
-			v-if="datasets.length > 0"
+			v-if="datasets.length > 0 || loading"
 			:items="paginatedDatasets"
 			:columns="tableColumns"
 			:loading="loading"
@@ -15,6 +15,7 @@
 							v-model="searchTerm"
 							placeholder="搜索数据集名称或描述..."
 							clearable
+							:disabled="loading"
 							@update:model-value="handleSearch"
 						>
 							<template #prepend>
@@ -28,6 +29,7 @@
 							:items="statusOptions"
 							placeholder="筛选状态"
 							clearable
+							:disabled="loading"
 							@update:model-value="handleFilter"
 						/>
 					</div>
@@ -36,6 +38,8 @@
 							v-tooltip="'刷新列表'"
 							icon
 							rounded
+							:loading="loading"
+							:disabled="loading"
 							@click="refreshData"
 						>
 							<template #icon>
@@ -52,6 +56,8 @@
 						v-tooltip="item.status === 'active' ? '隐藏数据集' : '显示数据集'"
 						icon
 						x-small
+						:loading="rowActionLoading[item.id]?.visibility"
+						:disabled="rowActionLoading[item.id]?.visibility"
 						@click="toggleVisibility(item)"
 					>
 						<template #icon>
@@ -63,6 +69,8 @@
 						v-tooltip="'查看详情'"
 						icon
 						x-small
+						:loading="rowActionLoading[item.id]?.view"
+						:disabled="rowActionLoading[item.id]?.view"
 						:to="`/admin/content/${item.collection_name}`"
 					>
 						<template #icon>
@@ -75,6 +83,8 @@
 						v-tooltip="'⚠️ 危险操作：此操作将清空所有数据且不可恢复'"
 						x-small
 						class="danger-action danger-action--truncate"
+						:loading="rowActionLoading[item.id]?.truncate"
+						:disabled="rowActionLoading[item.id]?.truncate"
 						@click="confirmTruncate(item)"
 					>
 						<template #icon>
@@ -88,6 +98,8 @@
 						v-tooltip="'⚠️ 危险操作：此操作将永久删除数据集且不可恢复'"
 						x-small
 						class="danger-action danger-action--delete"
+						:loading="rowActionLoading[item.id]?.delete"
+						:disabled="rowActionLoading[item.id]?.delete"
 						@click="confirmDelete(item)"
 					>
 						<template #icon>
@@ -122,6 +134,7 @@
 						:length="totalPages"
 						:total-visible="7"
 						show-first-last
+						:disabled="loading"
 					/>
 					<div class="page-info">
 						<span>共 {{ filteredDatasets.length }} 条记录</span>
@@ -130,6 +143,7 @@
 							:items="[10, 20, 50, 100]"
 							inline
 							dense
+							:disabled="loading"
 							@update:model-value="handleItemsPerPageChange"
 						/>
 					</div>
@@ -137,10 +151,37 @@
 			</template>
 		</v-table>
 
-		<v-notice v-else-if="!loading" type="info">
+		<!-- 加载状态 -->
+		<div v-else-if="loading" class="loading-container">
+			<v-progress-circular indeterminate />
+			<p class="loading-text">正在加载数据集列表...</p>
+		</div>
+
+		<!-- 空状态 -->
+		<v-notice v-else-if="!loading && !error.show" type="info">
 			暂无数据集，请先导入数据
 		</v-notice>
 
+		<!-- 错误状态 -->
+		<v-notice v-else-if="error.show" type="danger" class="error-notice">
+			<div class="error-content">
+				<div class="error-header">
+					<v-icon name="error" class="error-icon" />
+					<strong>加载失败</strong>
+					<span v-if="error.code" class="error-code">({{ error.code }})</span>
+				</div>
+				<p class="error-message">{{ error.message }}</p>
+				<v-button
+					v-if="error.code === 'NETWORK_ERROR' || error.code?.startsWith('HTTP_5')"
+					@click="refreshData"
+					small
+				>
+					重试
+				</v-button>
+			</div>
+		</v-notice>
+
+		<!-- 清空确认对话框 -->
 		<v-dialog v-model="truncateDialog" @update:model-value="handleTruncateDialogClose">
 			<v-card class="danger-dialog">
 				<v-card-title class="danger-dialog__title">
@@ -169,15 +210,21 @@
 							id="truncate-confirm-input"
 							v-model="confirmationInput"
 							placeholder="输入数据集名称后才可继续"
+							:disabled="actionLoading"
 						/>
 					</div>
 				</v-card-text>
 				<v-card-actions>
-					<v-button @click="truncateDialog = false">取消</v-button>
+					<v-button
+						:disabled="actionLoading"
+						@click="truncateDialog = false"
+					>
+						取消
+					</v-button>
 					<v-button
 						:loading="actionLoading"
 						color="danger"
-						:disabled="!canConfirmDangerAction"
+						:disabled="!canConfirmDangerAction || actionLoading"
 						@click="executeTruncate"
 					>
 						{{ confirmButtonLabel('确认清空') }}
@@ -186,6 +233,7 @@
 			</v-card>
 		</v-dialog>
 
+		<!-- 删除确认对话框 -->
 		<v-dialog v-model="deleteDialog" @update:model-value="handleDeleteDialogClose">
 			<v-card class="danger-dialog">
 				<v-card-title class="danger-dialog__title">
@@ -214,15 +262,21 @@
 							id="delete-confirm-input"
 							v-model="confirmationInput"
 							placeholder="输入数据集名称后才可继续"
+							:disabled="actionLoading"
 						/>
 					</div>
 				</v-card-text>
 				<v-card-actions>
-					<v-button @click="deleteDialog = false">取消</v-button>
+					<v-button
+						:disabled="actionLoading"
+						@click="deleteDialog = false"
+					>
+						取消
+					</v-button>
 					<v-button
 						:loading="actionLoading"
 						color="danger"
-						:disabled="!canConfirmDangerAction"
+						:disabled="!canConfirmDangerAction || actionLoading"
 						@click="executeDelete"
 					>
 						{{ confirmButtonLabel('确认删除') }}
@@ -231,6 +285,7 @@
 			</v-card>
 		</v-dialog>
 
+		<!-- Toast 通知 -->
 		<v-toast v-model="toast.show" :type="toast.type">
 			{{ toast.message }}
 		</v-toast>
@@ -268,6 +323,12 @@ const userStore = useUserStore();
 const datasets = ref<Dataset[]>([]);
 const loading = ref(false);
 const actionLoading = ref(false);
+const rowActionLoading = ref<Record<number, {
+	visibility?: boolean;
+	view?: boolean;
+	truncate?: boolean;
+	delete?: boolean;
+}>>({});
 
 const searchTerm = ref('');
 const statusFilter = ref<string | null>(null);
@@ -284,6 +345,15 @@ const toast = ref({
 	show: false,
 	message: '',
 	type: 'success' as 'success' | 'error' | 'warning' | 'info'
+});
+
+const error = ref<{
+	show: boolean;
+	message: string;
+	code?: string;
+}>({
+	show: false,
+	message: ''
 });
 
 const statusOptions = [
@@ -352,6 +422,8 @@ const paginatedDatasets = computed(() => {
 
 const fetchDatasets = async () => {
 	loading.value = true;
+	error.value = { show: false, message: '' };
+
 	try {
 		const response = await api.get('/items/bt_dataset_registry', {
 			params: {
@@ -365,10 +437,49 @@ const fetchDatasets = async () => {
 			datasets.value = response.data.data;
 		} else {
 			datasets.value = [];
+			error.value = {
+				show: true,
+				message: '服务器返回了无效的数据格式',
+				code: 'INVALID_RESPONSE'
+			};
 		}
-	} catch (error) {
-		console.error('获取数据集列表失败:', error);
-		showToast('获取数据集列表失败', 'error');
+	} catch (err: any) {
+		console.error('获取数据集列表失败:', err);
+
+		let errorMessage = '获取数据集列表失败';
+		let errorCode = 'FETCH_ERROR';
+
+		if (err.response) {
+			// 服务器返回错误响应
+			const statusCode = err.response.status;
+			errorCode = `HTTP_${statusCode}`;
+
+			if (statusCode === 403) {
+				errorMessage = '您没有权限访问数据集列表';
+			} else if (statusCode === 500) {
+				errorMessage = '服务器内部错误，请稍后重试';
+			} else if (statusCode === 503) {
+				errorMessage = '服务暂时不可用，请稍后重试';
+			} else if (err.response.data?.errors?.[0]?.message) {
+				errorMessage = err.response.data.errors[0].message;
+			}
+		} else if (err.request) {
+			// 请求已发送但没有收到响应
+			errorMessage = '网络连接失败，请检查网络设置';
+			errorCode = 'NETWORK_ERROR';
+		} else {
+			// 请求配置出错
+			errorMessage = err.message || '请求配置错误';
+			errorCode = 'REQUEST_ERROR';
+		}
+
+		error.value = {
+			show: true,
+			message: errorMessage,
+			code: errorCode
+		};
+
+		showToast(errorMessage, 'error');
 		datasets.value = [];
 	} finally {
 		loading.value = false;
@@ -378,8 +489,9 @@ const fetchDatasets = async () => {
 const toggleVisibility = async (dataset: Dataset) => {
 	if (!rowActionLoading.value[dataset.id]) rowActionLoading.value[dataset.id] = {};
 	rowActionLoading.value[dataset.id].visibility = true;
-	
+
 	const newStatus = dataset.status === 'active' ? 'hidden' : 'active';
+	const originalStatus = dataset.status;
 
 	try {
 		await api.patch(`/items/bt_dataset_registry/${dataset.id}`, {
@@ -388,26 +500,26 @@ const toggleVisibility = async (dataset: Dataset) => {
 
 		dataset.status = newStatus;
 		showToast(`数据集已${newStatus === 'active' ? '显示' : '隐藏'}`, 'success');
-	} catch (error) {
-		console.error('更新状态失败:', error);
-		showToast('更新状态失败', 'error');
+	} catch (err: any) {
+		console.error('更新状态失败:', err);
+
+		let errorMessage = '更新状态失败';
+		if (err.response?.data?.errors?.[0]?.message) {
+			errorMessage = err.response.data.errors[0].message;
+		} else if (err.response?.status === 403) {
+			errorMessage = '您没有权限更改数据集状态';
+		} else if (err.response?.status === 404) {
+			errorMessage = '数据集不存在';
+		}
+
+		showToast(errorMessage, 'error');
+		// 恢复原状态
+		dataset.status = originalStatus;
 	} finally {
 		if (rowActionLoading.value[dataset.id]) {
 			rowActionLoading.value[dataset.id].visibility = false;
 		}
 	}
-};
-
-const handleViewDetails = (dataset: Dataset) => {
-	if (!rowActionLoading.value[dataset.id]) rowActionLoading.value[dataset.id] = {};
-	rowActionLoading.value[dataset.id].view = true;
-	showToast('正在加载详情...', 'info');
-	
-	setTimeout(() => {
-		if (rowActionLoading.value[dataset.id]) {
-			rowActionLoading.value[dataset.id].view = false;
-		}
-	}, 1000);
 };
 
 const confirmTruncate = (dataset: Dataset) => {
@@ -421,15 +533,33 @@ const executeTruncate = async () => {
 	if (!selectedItem.value) return;
 
 	actionLoading.value = true;
+	const originalRecordCount = selectedItem.value.record_count;
+
 	try {
 		await api.post(`/custom/excel-importer/truncate/${selectedItem.value.collection_name}`);
 
 		selectedItem.value.record_count = 0;
 		showToast('数据集已清空', 'success');
 		truncateDialog.value = false;
-	} catch (error) {
-		console.error('清空数据集失败:', error);
-		showToast('清空数据集失败', 'error');
+	} catch (err: any) {
+		console.error('清空数据集失败:', err);
+
+		let errorMessage = '清空数据集失败';
+		if (err.response?.data?.errors?.[0]?.message) {
+			errorMessage = err.response.data.errors[0].message;
+		} else if (err.response?.status === 403) {
+			errorMessage = '您没有权限清空数据集';
+		} else if (err.response?.status === 404) {
+			errorMessage = '数据集不存在';
+		} else if (err.response?.status === 500) {
+			errorMessage = '服务器内部错误，请稍后重试';
+		}
+
+		showToast(errorMessage, 'error');
+		// 恢复原记录数
+		if (selectedItem.value) {
+			selectedItem.value.record_count = originalRecordCount;
+		}
 	} finally {
 		actionLoading.value = false;
 		selectedItem.value = null;
@@ -447,15 +577,28 @@ const executeDelete = async () => {
 	if (!selectedItem.value) return;
 
 	actionLoading.value = true;
+
 	try {
 		await api.delete(`/custom/excel-importer/dataset/${selectedItem.value.collection_name}`);
 
 		datasets.value = datasets.value.filter(d => d.id !== selectedItem.value?.id);
 		showToast('数据集已删除', 'success');
 		deleteDialog.value = false;
-	} catch (error) {
-		console.error('删除数据集失败:', error);
-		showToast('删除数据集失败', 'error');
+	} catch (err: any) {
+		console.error('删除数据集失败:', err);
+
+		let errorMessage = '删除数据集失败';
+		if (err.response?.data?.errors?.[0]?.message) {
+			errorMessage = err.response.data.errors[0].message;
+		} else if (err.response?.status === 403) {
+			errorMessage = '您没有权限删除数据集';
+		} else if (err.response?.status === 404) {
+			errorMessage = '数据集不存在';
+		} else if (err.response?.status === 500) {
+			errorMessage = '服务器内部错误，请稍后重试';
+		}
+
+		showToast(errorMessage, 'error');
 	} finally {
 		actionLoading.value = false;
 		selectedItem.value = null;
@@ -475,14 +618,14 @@ const handleItemsPerPageChange = () => {
 };
 
 const handleTruncateDialogClose = (value: boolean) => {
-	if (!value) {
+	if (!value && !actionLoading.value) {
 		resetDangerDialogState();
 	}
 	truncateDialog.value = value;
 };
 
 const handleDeleteDialogClose = (value: boolean) => {
-	if (!value) {
+	if (!value && !actionLoading.value) {
 		resetDangerDialogState();
 	}
 	deleteDialog.value = value;
@@ -620,6 +763,53 @@ onBeforeUnmount(() => {
 	justify-content: center;
 	align-items: center;
 	flex-wrap: wrap;
+}
+
+.loading-container {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	padding: 64px 24px;
+	gap: 16px;
+}
+
+.loading-text {
+	color: var(--theme--foreground-subdued);
+	font-size: 14px;
+	margin: 0;
+}
+
+.error-notice {
+	margin: 16px;
+}
+
+.error-content {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+.error-header {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.error-icon {
+	color: var(--theme--danger);
+	font-size: 20px;
+}
+
+.error-code {
+	color: var(--theme--foreground-subdued);
+	font-size: 12px;
+	font-family: monospace;
+}
+
+.error-message {
+	margin: 0;
+	color: var(--theme--danger);
 }
 
 .danger-action {
