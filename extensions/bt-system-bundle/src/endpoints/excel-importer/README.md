@@ -257,6 +257,65 @@ const createResponse = await fetch('/custom/excel/create-collection', {
 2. **集合名称**: 集合名称严格验证，防止 SQL 注入
 3. **错误处理**: 所有错误都有详细的错误码和消息
 4. **任务隔离**: 每个上传任务都有唯一的 ID，避免冲突
+5. **权限控制**:
+   - 使用统一的权限检查器服务进行权限验证
+   - 基于角色的访问控制（RBAC）
+   - 支持的操作权限：
+     - `upload_file`: 上传文件（需要数据集编辑者或更高级别）
+     - `parse_file`: 解析文件（需要数据集编辑者或更高级别）
+     - `create_collection`: 创建集合（需要数据集管理员或更高级别）
+     - `truncate_dataset`: 清空数据集（需要数据集管理员或更高级别）
+     - `delete_collection`: 删除数据集（需要数据集管理员或更高级别）
+   - 角色层级：
+     - `admin`: 系统管理员 - 所有权限
+     - `ds-manager`: 数据集管理员 - 管理数据集的完整生命周期
+     - `ds-editor`: 数据集编辑者 - 上传和导入数据
+     - `dataset-viewer`: 数据集查看者 - 只读访问
+     - `public`: 公共访问 - 无权限
+
+## 权限配置示例
+
+### Directus 角色配置
+
+在 Directus 中配置自定义角色以支持权限系统：
+
+```sql
+-- 创建数据集管理员角色
+INSERT INTO directus_roles (name, icon, description)
+VALUES ('数据集管理员', 'admin', '具有数据集的完全管理权限');
+
+-- 创建数据集编辑者角色
+INSERT INTO directus_roles (name, icon, description)
+VALUES ('数据集编辑者', 'edit', '可以上传和导入数据');
+
+-- 创建数据集查看者角色
+INSERT INTO directus_roles (name, icon, description)
+VALUES ('数据集查看者', 'visibility', '只能查看数据集内容');
+```
+
+### 权限检查使用示例
+
+```typescript
+import { PermissionChecker, PermissionAction } from '@/shared/services/permission-checker';
+
+// 在路由处理中使用权限检查
+router.post('/custom/excel/upload', async (req, res) => {
+  const userContext = PermissionChecker.extractUserContext(req);
+  const result = PermissionChecker.hasPermission(
+    userContext,
+    PermissionAction.UPLOAD_FILE
+  );
+
+  if (!result.granted) {
+    return res.status(403).json({
+      error: result.errorCode,
+      message: result.errorMessage,
+    });
+  }
+
+  // 继续处理上传逻辑...
+});
+```
 
 ## 后续实现
 

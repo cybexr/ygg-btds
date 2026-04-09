@@ -4,6 +4,8 @@ import { ExcelImportService } from '../../shared/services/excel-import-service';
 import { fileUploadConfig, FileUploadConfig } from './config';
 import { validateExcelFile } from './utils/file-validator';
 import { VirusScanner, createVirusScanner } from './utils/virus-scanner';
+import { PermissionChecker } from '../../../../src/shared/services/permission-checker';
+import { PermissionAction, SystemRole } from '../../../../src/shared/constants/roles';
 
 const excelService = new ExcelImportService();
 const virusScanner = createVirusScanner();
@@ -231,24 +233,19 @@ export function registerRoutes(router: Router): void {
 				});
 			}
 
-			// 检查权限 - 只有 ds-manager 可以清空数据集
-			const user = req.accountability?.user;
-			if (!user) {
-				return res.status(401).json({
-					error: 'UNAUTHORIZED',
-					message: '未授权访问',
-				});
-			}
+			// 使用权限检查器验证权限
+			const userContext = PermissionChecker.extractUserContext(req);
+			const permissionResult = PermissionChecker.hasPermission(
+				userContext,
+				PermissionAction.TRUNCATE_DATASET
+			);
 
-			// 获取用户角色
-			const userRole = req.accountability?.role;
-			const isAdmin = userRole === 'admin' || userRole === 1;
-			const isDsManager = userRole === 'ds-manager';
-
-			if (!isAdmin && !isDsManager) {
-				return res.status(403).json({
-					error: 'FORBIDDEN',
-					message: '只有数据集管理员可以清空数据集',
+			if (!permissionResult.granted) {
+				return res.status(
+					permissionResult.errorCode === 'UNAUTHORIZED' ? 401 : 403
+				).json({
+					error: permissionResult.errorCode,
+					message: permissionResult.errorMessage,
 				});
 			}
 
@@ -284,24 +281,19 @@ export function registerRoutes(router: Router): void {
 				});
 			}
 
-			// 检查权限 - 只有 ds-manager 可以删除数据集
-			const user = req.accountability?.user;
-			if (!user) {
-				return res.status(401).json({
-					error: 'UNAUTHORIZED',
-					message: '未授权访问',
-				});
-			}
+			// 使用权限检查器验证权限
+			const userContext = PermissionChecker.extractUserContext(req);
+			const permissionResult = PermissionChecker.hasPermission(
+				userContext,
+				PermissionAction.DELETE_COLLECTION
+			);
 
-			// 获取用户角色
-			const userRole = req.accountability?.role;
-			const isAdmin = userRole === 'admin' || userRole === 1;
-			const isDsManager = userRole === 'ds-manager';
-
-			if (!isAdmin && !isDsManager) {
-				return res.status(403).json({
-					error: 'FORBIDDEN',
-					message: '只有数据集管理员可以删除数据集',
+			if (!permissionResult.granted) {
+				return res.status(
+					permissionResult.errorCode === 'UNAUTHORIZED' ? 401 : 403
+				).json({
+					error: permissionResult.errorCode,
+					message: permissionResult.errorMessage,
 				});
 			}
 
