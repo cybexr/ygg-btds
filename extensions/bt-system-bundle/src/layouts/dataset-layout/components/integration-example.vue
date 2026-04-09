@@ -51,6 +51,10 @@
 
 		<!-- Layout Content -->
 		<div class="layout-content">
+			<v-notice v-if="collectionError" type="danger" class="collection-error-notice">
+				{{ collectionError }}
+			</v-notice>
+
 			<!-- Table View - 使用新的 DatasetTableView 组件 -->
 			<DatasetTableView
 				v-if="viewMode === 'table'"
@@ -127,6 +131,7 @@
 import { ref, computed, onMounted } from 'vue';
 import { useApi, useStores } from '@directus/extensions-sdk';
 import DatasetTableView from './components/DatasetTableView.vue';
+import { useCollectionValidation } from '../composables/useCollectionValidation';
 import type { Field } from '@directus/types';
 
 interface Props {
@@ -152,10 +157,12 @@ const emit = defineEmits<Emits>();
 const api = useApi();
 const { useFieldsStore } = useStores();
 const fieldsStore = useFieldsStore();
+const collectionValidation = useCollectionValidation();
 
 const viewMode = ref<'table' | 'card'>('table');
 const selection = ref<Set<string | number>>(new Set());
 const itemCount = ref<number | null>(null);
+const collectionError = computed(() => collectionValidation.validationError.value);
 
 const displayFields = computed(() => {
 	return props.fields.slice(0, 4);
@@ -224,8 +231,16 @@ const handleOptionsUpdate = (options: Record<string, unknown>) => {
 };
 
 const loadItemCount = async () => {
+	const validation = collectionValidation.validateCollection(props.collection);
+	if (!validation.isValid) {
+		itemCount.value = null;
+		return;
+	}
+
+	collectionValidation.clearValidationError();
+
 	try {
-		const response = await api.get(`/items/${props.collection}`, {
+		const response = await api.get(`/items/${validation.sanitized}`, {
 			params: {
 				limit: 0,
 				meta: 'total_count',
@@ -233,6 +248,7 @@ const loadItemCount = async () => {
 		});
 		itemCount.value = response.data?.meta?.total_count || 0;
 	} catch (error) {
+		collectionValidation.validationError.value = '集合统计加载失败，请稍后重试';
 		console.error('Failed to load item count:', error);
 	}
 };
@@ -293,6 +309,10 @@ onMounted(() => {
 	overflow: hidden;
 	display: flex;
 	flex-direction: column;
+}
+
+.collection-error-notice {
+	margin: 16px 20px 0;
 }
 
 .card-view {

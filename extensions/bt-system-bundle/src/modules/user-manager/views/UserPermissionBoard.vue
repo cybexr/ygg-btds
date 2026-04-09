@@ -108,7 +108,10 @@
 						</template>
 
 						<template #item.ds-descriptor-crud="{ item }">
-							<div class="checkbox-cell">
+							<div
+								class="checkbox-cell"
+								:class="{ 'highlight-cell': isCellHighlighted(item.id, 'ds-descriptors', 'ds-descriptor-crud') }"
+							>
 								<v-checkbox
 									:model-value="isPermissionEnabled(item.id, 'ds-descriptors', 'ds-descriptor-crud')"
 									@update:model-value="(enabled) => handlePermissionChange(item.id, 'ds-descriptors', 'ds-descriptor-crud', enabled)"
@@ -117,7 +120,10 @@
 						</template>
 
 						<template #item.ds-reader-read="{ item }">
-							<div class="checkbox-cell">
+							<div
+								class="checkbox-cell"
+								:class="{ 'highlight-cell': isCellHighlighted(item.id, 'ds-descriptors', 'ds-reader-read') }"
+							>
 								<v-checkbox
 									:model-value="isPermissionEnabled(item.id, 'ds-descriptors', 'ds-reader-read')"
 									@update:model-value="(enabled) => handlePermissionChange(item.id, 'ds-descriptors', 'ds-reader-read', enabled)"
@@ -126,7 +132,10 @@
 						</template>
 
 						<template v-for="dataset in activeDatasets" :key="dataset.id" #[`item-dataset-${dataset.id}`]="{ item }">
-							<div class="checkbox-cell">
+							<div
+								class="checkbox-cell"
+								:class="{ 'highlight-cell': isCellHighlighted(item.id, dataset.collection_name, 'ds-reader-read') }"
+							>
 								<v-checkbox
 									:model-value="isPermissionEnabled(item.id, dataset.collection_name, 'ds-reader-read')"
 									@update:model-value="(enabled) => handlePermissionChange(item.id, dataset.collection_name, 'ds-reader-read', enabled)"
@@ -159,6 +168,37 @@
 							dense
 							@update:model-value="handleItemsPerPageChange"
 						/>
+					</div>
+				</div>
+
+				<div v-if="hasBatchFeedback" class="batch-feedback-panel">
+					<div class="batch-feedback-header">
+						<div>
+							<div class="batch-feedback-title">批量变更摘要</div>
+							<div class="batch-feedback-subtitle">本次操作已更新 {{ batchAffectedPermissions.size }} 个权限单元格</div>
+						</div>
+						<v-button small secondary @click="clearBatchFeedback">
+							清除高亮
+						</v-button>
+					</div>
+					<div class="batch-feedback-stats">
+						<div class="feedback-stat feedback-stat-created">
+							<span class="feedback-stat-label">新增</span>
+							<strong>{{ batchChangesSummary.created }}</strong>
+						</div>
+						<div class="feedback-stat feedback-stat-updated">
+							<span class="feedback-stat-label">更新</span>
+							<strong>{{ batchChangesSummary.updated }}</strong>
+						</div>
+						<div class="feedback-stat feedback-stat-deleted">
+							<span class="feedback-stat-label">删除</span>
+							<strong>{{ batchChangesSummary.deleted }}</strong>
+						</div>
+					</div>
+					<div class="batch-feedback-actions">
+						<v-button small @click="showBatchDetailsDialog = true">
+							查看详情
+						</v-button>
 					</div>
 				</div>
 			</div>
@@ -268,6 +308,45 @@
 			</v-card>
 		</v-dialog>
 
+		<!-- 批量变更详情对话框 -->
+		<v-dialog v-model="showBatchDetailsDialog" @update:model-value="handleBatchDetailsDialogClose">
+			<v-card>
+				<v-card-title>批量权限变更详情</v-card-title>
+				<v-card-text>
+					<div v-if="batchChangeDetails.length > 0" class="batch-detail-table">
+						<div class="batch-detail-header">
+							<span>用户</span>
+							<span>数据集</span>
+							<span>模板</span>
+							<span>操作</span>
+							<span>修改前</span>
+							<span>修改后</span>
+						</div>
+						<div
+							v-for="detail in batchChangeDetails"
+							:key="detail.key"
+							class="batch-detail-row"
+						>
+							<span>{{ detail.user }}</span>
+							<span>{{ detail.dataset }}</span>
+							<span>{{ detail.templateLabel }}</span>
+							<span :class="['batch-detail-action', `batch-detail-action-${detail.action}`]">
+								{{ getBatchActionLabel(detail.action) }}
+							</span>
+							<span>{{ formatPermissionState(detail.before) }}</span>
+							<span>{{ formatPermissionState(detail.after) }}</span>
+						</div>
+					</div>
+					<v-notice v-else type="info">
+						暂无批量变更详情
+					</v-notice>
+				</v-card-text>
+				<v-card-actions>
+					<v-button @click="showBatchDetailsDialog = false">关闭</v-button>
+				</v-card-actions>
+			</v-card>
+		</v-dialog>
+
 		<!-- Toast 通知 -->
 		<v-toast v-model="toast.show" :type="toast.type">
 			{{ toast.message }}
@@ -276,7 +355,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 import { useApi } from '@directus/extensions-sdk';
 
 interface User {
@@ -304,6 +383,17 @@ interface UserPermission {
 	enabled: boolean;
 }
 
+interface BatchChangeDetail {
+	key: string;
+	user: string;
+	dataset: string;
+	template: string;
+	templateLabel: string;
+	action: 'created' | 'updated' | 'deleted';
+	before: boolean;
+	after: boolean;
+}
+
 interface TableColumn {
 	field: string;
 	name: string;
@@ -317,7 +407,7 @@ const api = useApi();
 const users = ref<User[]>([]);
 const datasets = ref<Dataset[]>([]);
 const currentPermissions = ref<UserPermission[]>([]);
-const permissionChanges = new Map<string, UserPermission>();
+const permissionChanges = ref(new Map<string, UserPermission>());
 
 const loading = ref(false);
 const saving = ref(false);
@@ -333,12 +423,16 @@ const itemsPerPage = ref(50);
 const showBatchGrantDialog = ref(false);
 const showPreviewDialog = ref(false);
 const showConfirmDialog = ref(false);
+const showBatchDetailsDialog = ref(false);
 const previewData = ref<any>(null);
 
 const batchTemplate = ref('ds-reader-read');
 const batchEnabled = ref(true);
 
 const selectedPermissions = ref<Set<string>>(new Set());
+const batchAffectedPermissions = ref<Set<string>>(new Set());
+const batchChangeDetails = ref<BatchChangeDetail[]>([]);
+const batchHighlightTimer = ref<ReturnType<typeof setTimeout> | null>(null);
 
 const toast = ref({
 	show: false,
@@ -424,11 +518,25 @@ const paginatedUsers = computed(() => {
 });
 
 const hasChanges = computed(() => {
-	return permissionChanges.size > 0;
+	return permissionChanges.value.size > 0;
 });
 
 const pendingChanges = computed(() => {
-	return permissionChanges;
+	return permissionChanges.value;
+});
+
+const hasBatchFeedback = computed(() => {
+	return batchChangeDetails.value.length > 0;
+});
+
+const batchChangesSummary = computed(() => {
+	return batchChangeDetails.value.reduce(
+		(summary, detail) => {
+			summary[detail.action] += 1;
+			return summary;
+		},
+		{ created: 0, updated: 0, deleted: 0 }
+	);
 });
 
 const fetchUsers = async () => {
@@ -521,8 +629,8 @@ const getPermissionKey = (userId: string, libraryId: string, template: string): 
 const isPermissionEnabled = (userId: string, libraryId: string, template: string): boolean => {
 	const key = getPermissionKey(userId, libraryId, template);
 
-	if (permissionChanges.has(key)) {
-		return permissionChanges.get(key)!.enabled;
+	if (permissionChanges.value.has(key)) {
+		return permissionChanges.value.get(key)!.enabled;
 	}
 
 	return currentPermissions.value.some(
@@ -532,12 +640,87 @@ const isPermissionEnabled = (userId: string, libraryId: string, template: string
 
 const handlePermissionChange = (userId: string, libraryId: string, template: string, enabled: boolean) => {
 	const key = getPermissionKey(userId, libraryId, template);
-	permissionChanges.set(key, {
+	permissionChanges.value.set(key, {
 		user_id: userId,
 		library_id: libraryId,
 		template,
 		enabled
 	});
+};
+
+const findCurrentPermission = (userId: string, libraryId: string, template: string) => {
+	return currentPermissions.value.find(
+		permission => permission.user_id === userId && permission.library_id === libraryId && permission.template === template
+	);
+};
+
+const getBatchActionType = (before: boolean, after: boolean, hadPendingChange: boolean): BatchChangeDetail['action'] => {
+	if (before !== after) {
+		if (after) return before ? 'updated' : 'created';
+		return 'deleted';
+	}
+
+	return hadPendingChange ? 'updated' : 'created';
+};
+
+const getTemplateLabel = (template: string) => {
+	const matched = templateOptions.find(option => option.value === template);
+	return matched?.text || template;
+};
+
+const getDatasetLabel = (libraryId: string) => {
+	if (libraryId === 'ds-descriptors') {
+		return '描述符库';
+	}
+
+	const dataset = datasets.value.find(item => item.collection_name === libraryId);
+	return dataset?.display_name || libraryId;
+};
+
+const getUserDisplayName = (userId: string) => {
+	const user = users.value.find(item => item.id === userId);
+	if (!user) return userId;
+
+	const name = `${user.first_name} ${user.last_name}`.trim();
+	return name ? `${name} (${user.email})` : user.email;
+};
+
+const clearBatchFeedback = () => {
+	if (batchHighlightTimer.value) {
+		clearTimeout(batchHighlightTimer.value);
+		batchHighlightTimer.value = null;
+	}
+
+	batchAffectedPermissions.value = new Set();
+	batchChangeDetails.value = [];
+	showBatchDetailsDialog.value = false;
+};
+
+const scheduleBatchFeedbackClear = () => {
+	if (batchHighlightTimer.value) {
+		clearTimeout(batchHighlightTimer.value);
+	}
+
+	batchHighlightTimer.value = setTimeout(() => {
+		clearBatchFeedback();
+	}, 4000);
+};
+
+const isCellHighlighted = (userId: string, libraryId: string, template: string) => {
+	return batchAffectedPermissions.value.has(getPermissionKey(userId, libraryId, template));
+};
+
+const getBatchActionLabel = (action: BatchChangeDetail['action']) => {
+	switch (action) {
+		case 'created': return '新增';
+		case 'updated': return '更新';
+		case 'deleted': return '删除';
+		default: return action;
+	}
+};
+
+const formatPermissionState = (enabled: boolean) => {
+	return enabled ? '启用' : '关闭';
 };
 
 const selectAllOnPage = () => {
@@ -558,26 +741,52 @@ const clearAllSelections = () => {
 	selectedPermissions.value.clear();
 };
 
-const applyBatchGrant = () => {
+const applyBatchGrant = async () => {
 	batchProcessing.value = true;
 
-	setTimeout(() => {
+	try {
+		clearBatchFeedback();
+
+		const detailsByKey = new Map<string, BatchChangeDetail>();
+
 		selectedPermissions.value.forEach(key => {
-			const [userId, libraryId, oldTemplate] = key.split(':');
+			const [userId, libraryId] = key.split(':');
 			const newKey = getPermissionKey(userId, libraryId, batchTemplate.value);
-			permissionChanges.set(newKey, {
+			const currentPermission = findCurrentPermission(userId, libraryId, batchTemplate.value);
+			const previousPending = permissionChanges.value.get(newKey);
+			const before = previousPending?.enabled ?? currentPermission?.enabled ?? false;
+			const after = batchEnabled.value;
+
+			permissionChanges.value.set(newKey, {
 				user_id: userId,
 				library_id: libraryId,
 				template: batchTemplate.value,
-				enabled: batchEnabled.value
+				enabled: after
+			});
+
+			detailsByKey.set(newKey, {
+				key: newKey,
+				user: getUserDisplayName(userId),
+				dataset: getDatasetLabel(libraryId),
+				template: batchTemplate.value,
+				templateLabel: getTemplateLabel(batchTemplate.value),
+				action: getBatchActionType(before, after, Boolean(previousPending)),
+				before,
+				after
 			});
 		});
 
+		batchAffectedPermissions.value = new Set(detailsByKey.keys());
+		batchChangeDetails.value = Array.from(detailsByKey.values()).sort((left, right) => {
+			return left.user.localeCompare(right.user, 'zh-CN') || left.dataset.localeCompare(right.dataset, 'zh-CN');
+		});
+		scheduleBatchFeedbackClear();
 		clearAllSelections();
 		showBatchGrantDialog.value = false;
-		batchProcessing.value = false;
 		showToast('批量授权已应用，请保存以生效', 'success');
-	}, 300);
+	} finally {
+		batchProcessing.value = false;
+	}
 };
 
 const handlePreview = async () => {
@@ -589,7 +798,7 @@ const handlePreview = async () => {
 
 	try {
 		const requestData = {
-			user_library_permissions: Array.from(permissionChanges.values())
+			user_library_permissions: Array.from(permissionChanges.value.values())
 		};
 
 		const response = await api.post('/custom/permissions/preview', requestData);
@@ -621,14 +830,15 @@ const executeSave = async () => {
 
 	try {
 		const requestData = {
-			user_library_permissions: Array.from(permissionChanges.values())
+			user_library_permissions: Array.from(permissionChanges.value.values())
 		};
 
 		const response = await api.post('/custom/permissions/sync', requestData);
 
 		if (response.data && response.data.success) {
 			showToast('权限保存成功', 'success');
-			permissionChanges.clear();
+			permissionChanges.value.clear();
+			clearBatchFeedback();
 			await fetchCurrentPermissions();
 		}
 	} catch (error) {
@@ -665,6 +875,10 @@ const handlePreviewDialogClose = (value: boolean) => {
 		previewData.value = null;
 	}
 	showPreviewDialog.value = value;
+};
+
+const handleBatchDetailsDialogClose = (value: boolean) => {
+	showBatchDetailsDialog.value = value;
 };
 
 const refreshData = async () => {
@@ -708,6 +922,10 @@ onMounted(async () => {
 	} finally {
 		loading.value = false;
 	}
+});
+
+onBeforeUnmount(() => {
+	clearBatchFeedback();
 });
 </script>
 
@@ -788,6 +1006,16 @@ onMounted(async () => {
 	align-items: center;
 	width: 100%;
 	height: 100%;
+	border: 2px solid transparent;
+	border-radius: 10px;
+	transition: background-color 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.highlight-cell {
+	background: var(--theme--primary-subdued);
+	border-color: var(--theme--primary);
+	box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--theme--primary) 18%, transparent);
+	animation: highlight-fade 4s ease-out forwards;
 }
 
 :deep(.checkbox-cell .v-checkbox) {
@@ -816,6 +1044,128 @@ onMounted(async () => {
 	flex-direction: column;
 	gap: 16px;
 	margin: 16px 0;
+}
+
+.batch-feedback-panel {
+	position: fixed;
+	right: 24px;
+	bottom: 24px;
+	width: min(360px, calc(100vw - 32px));
+	padding: 18px;
+	border-radius: 14px;
+	border: 1px solid var(--theme--primary-subdued);
+	background: color-mix(in srgb, var(--theme--background-page) 92%, var(--theme--primary-subdued));
+	box-shadow: 0 18px 48px rgba(15, 23, 42, 0.14);
+	z-index: 30;
+	display: flex;
+	flex-direction: column;
+	gap: 14px;
+}
+
+.batch-feedback-header {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 12px;
+}
+
+.batch-feedback-title {
+	font-size: 1rem;
+	font-weight: 700;
+	color: var(--theme--foreground);
+}
+
+.batch-feedback-subtitle {
+	margin-top: 4px;
+	font-size: 0.85rem;
+	color: var(--theme--foreground-subdued);
+}
+
+.batch-feedback-stats {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 10px;
+}
+
+.feedback-stat {
+	padding: 12px;
+	border-radius: 12px;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.feedback-stat-created {
+	background: color-mix(in srgb, var(--theme--success) 12%, transparent);
+	color: var(--theme--success);
+}
+
+.feedback-stat-updated {
+	background: color-mix(in srgb, var(--theme--primary) 12%, transparent);
+	color: var(--theme--primary);
+}
+
+.feedback-stat-deleted {
+	background: color-mix(in srgb, var(--theme--danger) 12%, transparent);
+	color: var(--theme--danger);
+}
+
+.feedback-stat-label {
+	font-size: 0.8rem;
+	color: var(--theme--foreground-subdued);
+}
+
+.batch-feedback-actions {
+	display: flex;
+	justify-content: flex-end;
+}
+
+.batch-detail-table {
+	display: flex;
+	flex-direction: column;
+	max-height: 420px;
+	overflow: auto;
+	border: 1px solid var(--theme--border-subdued);
+	border-radius: 12px;
+}
+
+.batch-detail-header,
+.batch-detail-row {
+	display: grid;
+	grid-template-columns: 1.4fr 1fr 1fr 0.8fr 0.8fr 0.8fr;
+	gap: 12px;
+	align-items: center;
+	padding: 12px 14px;
+}
+
+.batch-detail-header {
+	position: sticky;
+	top: 0;
+	background: var(--theme--background-page);
+	font-size: 0.82rem;
+	font-weight: 700;
+	color: var(--theme--foreground-subdued);
+}
+
+.batch-detail-row {
+	border-top: 1px solid var(--theme--border-subdued);
+	font-size: 0.9rem;
+}
+
+.batch-detail-action {
+	font-weight: 700;
+}
+
+.batch-detail-action-created {
+	color: var(--theme--success);
+}
+
+.batch-detail-action-updated {
+	color: var(--theme--primary);
+}
+
+.batch-detail-action-deleted {
+	color: var(--theme--danger);
 }
 
 .preview-content {
@@ -857,6 +1207,24 @@ onMounted(async () => {
 	z-index: 10;
 }
 
+@keyframes highlight-fade {
+	0% {
+		background: color-mix(in srgb, var(--theme--primary) 24%, transparent);
+		border-color: var(--theme--primary);
+	}
+
+	70% {
+		background: color-mix(in srgb, var(--theme--primary-subdued) 100%, transparent);
+		border-color: var(--theme--primary);
+	}
+
+	100% {
+		background: transparent;
+		border-color: transparent;
+		box-shadow: none;
+	}
+}
+
 @media (max-width: 1024px) {
 	.filter-section {
 		flex-direction: column;
@@ -874,6 +1242,19 @@ onMounted(async () => {
 
 	.permission-matrix {
 		overflow-x: auto;
+	}
+
+	.batch-feedback-panel {
+		left: 16px;
+		right: 16px;
+		bottom: 16px;
+		width: auto;
+	}
+
+	.batch-feedback-stats,
+	.batch-detail-header,
+	.batch-detail-row {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
 	}
 }
 </style>

@@ -3,16 +3,14 @@
  * 负责处理异步数据导入、任务状态跟踪、批处理和错误管理
  */
 
+import { randomUUID } from 'crypto';
 import { Knex } from 'knex';
 
 /**
- * 生成唯一标识符
+ * 生成符合 RFC 4122 的 UUID v4 任务标识符
  */
 function generateUUID(): string {
-	return 'import_xxxxx_xxxxx'.replace(/[x]/g, () => {
-		const random = Math.random().toString(36)[2];
-		return random ? random : '0';
-	}) + Date.now().toString(36);
+	return randomUUID();
 }
 
 /**
@@ -41,7 +39,10 @@ export enum ErrorSeverity {
  * 导入任务配置
  */
 export interface ImportJobConfig {
-	jobIdentifier: string;
+	/**
+	 * 可选的导入任务标识符，未传入时自动生成 UUID v4。
+	 */
+	jobIdentifier?: string;
 	datasetRegistryId?: number;
 	sourceFileName: string;
 	fileSizeBytes: number;
@@ -119,6 +120,20 @@ interface QueueItem {
 	onProgress?: ProgressCallback;
 }
 
+interface JobStatusCacheEntry {
+	status: ImportJobStatus;
+	expiresAt: number;
+}
+
+interface JobPerformanceMetrics {
+	startTime: number;
+	batchTimes: number[];
+	cacheHits: number;
+	cacheMisses: number;
+	statusChecks: number;
+	cacheCheckTimes: number[];
+}
+
 /**
  * 导入任务运行器类
  */
@@ -128,9 +143,12 @@ export class ImportJobRunner {
 	private jobQueue: QueueItem[] = [];
 	private maxConcurrentJobs: number = 3;
 	private processingCount: number = 0;
+	private taskStatusCache: Map<number, JobStatusCacheEntry> = new Map();
+	private readonly cacheTtlMs: number = 5000;
+	private readonly statusCheckIntervalBatches: number = 10;
 
 	// 性能监控
-	private performanceMetrics: Map<number, { startTime: number; batchTimes: number[] }> = new Map();
+	private performanceMetrics: Map<number, JobPerformanceMetrics> = new Map();
 
 	constructor(database: Knex, maxConcurrentJobs?: number) {
 		this.database = database;
@@ -164,6 +182,7 @@ export class ImportJobRunner {
 
 		const jobId = job.id;
 		this.activeJobs.set(jobId, false);
+		this.updateCachedJobStatus(jobId, ImportJobStatus.PENDING);
 
 		return jobId;
 	}
@@ -190,10 +209,7 @@ export class ImportJobRunner {
 		}
 
 		// 初始化性能监控
-		this.performanceMetrics.set(jobId, {
-			startTime: Date.now(),
-			batchTimes: [],
-		});
+		this.performanceMetrics.set(jobId, this.createPerformanceMetrics());
 
 		// 更新任务状态为运行中
 		await this.updateJobStatus(jobId, ImportJobStatus.RUNNING);
@@ -205,26 +221,24 @@ export class ImportJobRunner {
 		let successRows = 0;
 		let failedRows = 0;
 		const errors: ImportErrorRecord[] = [];
+		let finalStatus: ImportJobStatus = ImportJobStatus.RUNNING;
+		const sheetName = job.sheet_name || undefined;
 
 		try {
 			// 分批处理数据
-			for (let i = 0; i < data.length; i += batchSize) {
-				// 检查任务是否被取消或暂停
-				const currentJob = await this.database('bt_import_jobs')
-					.where('id', jobId)
-					.first();
+			for (let i = 0, batchIndex = 0; i < data.length; i += batchSize, batchIndex++) {
+				const shouldRefreshStatus =
+					batchIndex === 0 || batchIndex % this.statusCheckIntervalBatches === 0;
+				const currentStatus = await this.getCachedJobStatus(jobId, shouldRefreshStatus);
 
-				if (!currentJob) {
-					throw new Error('任务不存在');
+				if (currentStatus === ImportJobStatus.CANCELLED) {
+					finalStatus = ImportJobStatus.CANCELLED;
+					this.activeJobs.set(jobId, false);
+					break;
 				}
 
-				if (currentJob.status === ImportJobStatus.CANCELLED) {
-					throw new Error('任务已取消');
-				}
-
-				if (currentJob.status === ImportJobStatus.PAUSED) {
-					// 暂停任务，保存当前进度
-					await this.updateJobStatus(jobId, ImportJobStatus.PAUSED);
+				if (currentStatus === ImportJobStatus.PAUSED) {
+					finalStatus = ImportJobStatus.PAUSED;
 					this.activeJobs.set(jobId, false);
 					break;
 				}
@@ -237,7 +251,7 @@ export class ImportJobRunner {
 					jobId,
 					batch,
 					targetCollection,
-					currentJob.sheet_name || undefined
+					sheetName
 				);
 
 				const batchTime = Date.now() - batchStartTime;
@@ -270,7 +284,7 @@ export class ImportJobRunner {
 				if (onProgress) {
 					onProgress({
 						jobId,
-						status: currentJob.status as ImportJobStatus,
+						status: finalStatus,
 						totalRows,
 						processedRows,
 						successRows,
@@ -282,8 +296,23 @@ export class ImportJobRunner {
 				}
 			}
 
+			if (finalStatus === ImportJobStatus.CANCELLED || finalStatus === ImportJobStatus.PAUSED) {
+				this.logCachePerformanceReport(jobId);
+
+				return {
+					jobId,
+					status: finalStatus,
+					totalRows,
+					processedRows,
+					successRows,
+					failedRows,
+					duration: Date.now() - this.getPerformanceMetricsBase(jobId).startTime,
+					errors,
+				};
+			}
+
 			// 任务完成
-			const finalStatus = failedRows === 0 ? ImportJobStatus.COMPLETED : ImportJobStatus.COMPLETED;
+			finalStatus = ImportJobStatus.COMPLETED;
 			await this.updateJobStatus(jobId, finalStatus);
 			await this.markJobCompleted(jobId);
 
@@ -295,6 +324,7 @@ export class ImportJobRunner {
 			const duration = metrics ? Date.now() - metrics.startTime : 0;
 
 			this.activeJobs.set(jobId, false);
+			this.logCachePerformanceReport(jobId);
 
 			return {
 				jobId,
@@ -312,6 +342,7 @@ export class ImportJobRunner {
 			await this.markJobFailed(jobId, error instanceof Error ? error.message : '未知错误');
 
 			this.activeJobs.set(jobId, false);
+			this.logCachePerformanceReport(jobId);
 
 			throw error;
 		}
@@ -410,6 +441,8 @@ export class ImportJobRunner {
 		await this.database('bt_import_jobs')
 			.where('id', jobId)
 			.update(updateData);
+
+		this.updateCachedJobStatus(jobId, status);
 	}
 
 	/**
@@ -737,12 +770,36 @@ export class ImportJobRunner {
 		};
 	}
 
+	getCacheMetrics(
+		jobId: number
+	): { hitRate: number; hits: number; misses: number; averageLookupTime: number; statusChecks: number } | undefined {
+		const metrics = this.performanceMetrics.get(jobId);
+		if (!metrics) {
+			return undefined;
+		}
+
+		const lookups = metrics.cacheHits + metrics.cacheMisses;
+		const averageLookupTime =
+			metrics.cacheCheckTimes.length > 0
+				? metrics.cacheCheckTimes.reduce((sum, time) => sum + time, 0) / metrics.cacheCheckTimes.length
+				: 0;
+
+		return {
+			hitRate: lookups > 0 ? metrics.cacheHits / lookups : 0,
+			hits: metrics.cacheHits,
+			misses: metrics.cacheMisses,
+			averageLookupTime: Math.round(averageLookupTime),
+			statusChecks: metrics.statusChecks,
+		};
+	}
+
 	/**
 	 * 清理完成的任务
 	 */
 	async cleanupJob(jobId: number): Promise<void> {
 		this.activeJobs.delete(jobId);
 		this.performanceMetrics.delete(jobId);
+		this.clearJobStatusCache(jobId);
 	}
 
 	/**
@@ -757,5 +814,90 @@ export class ImportJobRunner {
 	 */
 	getQueueLength(): number {
 		return this.jobQueue.length;
+	}
+
+	private createPerformanceMetrics(): JobPerformanceMetrics {
+		return {
+			startTime: Date.now(),
+			batchTimes: [],
+			cacheHits: 0,
+			cacheMisses: 0,
+			statusChecks: 0,
+			cacheCheckTimes: [],
+		};
+	}
+
+	private getPerformanceMetricsBase(jobId: number): JobPerformanceMetrics {
+		const metrics = this.performanceMetrics.get(jobId);
+		if (metrics) {
+			return metrics;
+		}
+
+		const initialMetrics = this.createPerformanceMetrics();
+		this.performanceMetrics.set(jobId, initialMetrics);
+		return initialMetrics;
+	}
+
+	private async getCachedJobStatus(jobId: number, forceRefresh: boolean = false): Promise<ImportJobStatus> {
+		const metrics = this.getPerformanceMetricsBase(jobId);
+		const lookupStartedAt = Date.now();
+		const cachedStatus = this.taskStatusCache.get(jobId);
+		const now = Date.now();
+
+		if (!forceRefresh && cachedStatus && cachedStatus.expiresAt > now) {
+			metrics.cacheHits++;
+			metrics.cacheCheckTimes.push(Date.now() - lookupStartedAt);
+			return cachedStatus.status;
+		}
+
+		metrics.cacheMisses++;
+		metrics.statusChecks++;
+
+		const job = await this.database('bt_import_jobs')
+			.where('id', jobId)
+			.first();
+
+		if (!job) {
+			throw new Error(`任务不存在: ${jobId}`);
+		}
+
+		const status = job.status as ImportJobStatus;
+		this.updateCachedJobStatus(jobId, status);
+		metrics.cacheCheckTimes.push(Date.now() - lookupStartedAt);
+
+		return status;
+	}
+
+	private updateCachedJobStatus(jobId: number, status: ImportJobStatus): void {
+		this.taskStatusCache.set(jobId, {
+			status,
+			expiresAt: Date.now() + this.cacheTtlMs,
+		});
+	}
+
+	private clearJobStatusCache(jobId: number): void {
+		this.taskStatusCache.delete(jobId);
+	}
+
+	private logCachePerformanceReport(jobId: number): void {
+		const cacheMetrics = this.getCacheMetrics(jobId);
+		if (!cacheMetrics) {
+			return;
+		}
+
+		if (cacheMetrics.statusChecks > 0) {
+			console.info(
+				`[ImportJobRunner] job=${jobId} cache hit rate=${Math.round(cacheMetrics.hitRate * 100)}% ` +
+					`hits=${cacheMetrics.hits} misses=${cacheMetrics.misses} statusChecks=${cacheMetrics.statusChecks}`
+			);
+		}
+
+		if (cacheMetrics.statusChecks > 0 && cacheMetrics.hitRate < 0.5) {
+			console.warn(
+				`[ImportJobRunner] job=${jobId} cache hit rate is below expectation: ${Math.round(
+					cacheMetrics.hitRate * 100
+				)}%`
+			);
+		}
 	}
 }

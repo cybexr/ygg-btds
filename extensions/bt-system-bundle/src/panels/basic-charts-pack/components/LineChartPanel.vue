@@ -17,6 +17,7 @@
 import { ref, onMounted, watch, onBeforeUnmount, computed } from 'vue';
 import { useApi } from '@directus/extensions-sdk';
 import * as echarts from 'echarts';
+import { validateCollection } from '../../../layouts/dataset-layout/composables/useCollectionValidation';
 import type { EChartsOption, ECharts } from 'echarts';
 
 interface Props {
@@ -90,6 +91,14 @@ const fetchChartData = async () => {
 		return;
 	}
 
+	const collectionValidation = validateCollection(props.collection);
+	if (!collectionValidation.isValid) {
+		error.value = collectionValidation.error;
+		loading.value = false;
+		chartData.value = [];
+		return;
+	}
+
 	loading.value = true;
 	error.value = '';
 
@@ -125,7 +134,7 @@ const fetchChartData = async () => {
 				break;
 		}
 
-		const response = await api.get(`/items/${props.collection}`, { params: query });
+		const response = await api.get(`/items/${collectionValidation.sanitized}`, { params: query });
 		chartData.value = response.data.data || [];
 	} catch (err: any) {
 		error.value = err.message || '数据加载失败';

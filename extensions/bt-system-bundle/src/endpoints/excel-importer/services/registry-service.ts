@@ -377,17 +377,39 @@ export class RegistryService {
 			status: row.status,
 			source_file_name: row.source_file_name,
 			record_count: row.record_count || 0,
-			field_schema_json: typeof row.field_schema_json === 'string'
-				? JSON.parse(row.field_schema_json)
-				: row.field_schema_json,
+			field_schema_json: this.safeParseJson(
+				row.field_schema_json,
+				[],
+				'field_schema_json'
+			),
 			last_import_job_id: row.last_import_job_id,
 			created_user_id: row.created_user_id,
 			updated_user_id: row.updated_user_id,
 			created_at: row.created_at,
 			updated_at: row.updated_at,
 			description: row.description,
-			tags: typeof row.tags === 'string' ? JSON.parse(row.tags) : row.tags || [],
+			tags: this.safeParseJson(row.tags, [], 'tags'),
 		};
+	}
+
+	private safeParseJson<T>(
+		value: T | string | null | undefined,
+		fallback: T,
+		fieldName: string
+	): T {
+		if (typeof value !== 'string') {
+			return value ?? fallback;
+		}
+
+		try {
+			return JSON.parse(value) as T;
+		} catch (error) {
+			console.warn(
+				`[RegistryService] Failed to parse ${fieldName}, using fallback value.`,
+				error
+			);
+			return fallback;
+		}
 	}
 
 	/**

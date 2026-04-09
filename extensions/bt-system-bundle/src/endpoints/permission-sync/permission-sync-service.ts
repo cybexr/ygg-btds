@@ -13,7 +13,7 @@ import {
 	PermissionConflict,
 	PermissionTemplate,
 } from './types';
-import { getPermissionTemplate, getTemplateCollections } from './templates';
+import { getPermissionTemplate } from './templates';
 
 export class PermissionSyncService {
 	private database: Knex;
@@ -213,10 +213,12 @@ export class PermissionSyncService {
 		collection: string,
 		actions: string[]
 	): DirectusPermission {
+		const roleId = this.requireRoleId(ulp);
+
 		// 如果有自定义权限配置，使用自定义配置
 		if (ulp.custom_permissions && ulp.custom_permissions.actions && ulp.custom_permissions.actions.length > 0) {
 			return {
-				role: ulp.user_id, // 使用 user_id 作为 role
+				role: roleId,
 				collection,
 				action: ulp.custom_permissions.actions[0] as any,
 				permissions: ulp.custom_permissions.permissions || null,
@@ -228,7 +230,7 @@ export class PermissionSyncService {
 
 		// 否则为每个动作生成一个权限配置
 		return {
-			role: ulp.user_id,
+			role: roleId,
 			collection,
 			action: actions[0] as any,
 			permissions: null,
@@ -236,6 +238,19 @@ export class PermissionSyncService {
 			presets: null,
 			fields: null,
 		};
+	}
+
+	/**
+	 * 确保权限同步始终使用 directus_roles.id。
+	 */
+	private requireRoleId(ulp: UserLibraryPermission): string {
+		const roleId = ulp.role_id?.toString().trim();
+		if (!roleId) {
+			throw new Error(
+				`Missing role_id for enabled permission: user ${ulp.user_id}, library ${ulp.library_id}`
+			);
+		}
+		return roleId;
 	}
 
 	/**

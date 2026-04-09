@@ -3,6 +3,7 @@
  * 展示如何在 Excel 导入 API 中使用 ImportJobRunner
  */
 
+import { randomUUID } from 'crypto';
 import { ImportJobRunner, ImportJobStatus, type BatchDataItem } from './import-job-runner';
 import { Router, Request, Response } from 'express';
 import { Knex } from 'knex';
@@ -36,7 +37,7 @@ export function createImportRoutes(database: Knex): Router {
 
 			// 创建导入任务
 			const config = {
-				jobIdentifier: `import_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+				jobIdentifier: randomUUID(),
 				sourceFileName: file_name,
 				fileSizeBytes: JSON.stringify(data).length,
 				totalRows: total_rows,

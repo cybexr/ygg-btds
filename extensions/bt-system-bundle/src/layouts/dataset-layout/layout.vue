@@ -77,6 +77,10 @@
 
 		<!-- Layout Content -->
 		<div class="layout-content">
+			<v-notice v-if="collectionError" type="danger" class="collection-error-notice">
+				{{ collectionError }}
+			</v-notice>
+
 			<!-- Table View -->
 			<div v-if="viewMode === 'table'" class="table-view">
 				<v-table
@@ -203,6 +207,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue';
 import { useApi, useStores } from '@directus/extensions-sdk';
+import { useCollectionValidation } from './composables/useCollectionValidation';
 import type { Field } from '@directus/types';
 
 interface Props {
@@ -228,6 +233,7 @@ const emit = defineEmits<Emits>();
 const api = useApi();
 const { useFieldsStore } = useStores();
 const fieldsStore = useFieldsStore();
+const collectionValidation = useCollectionValidation();
 
 const viewMode = ref<'table' | 'card'>('table');
 const searchTerm = ref('');
@@ -241,6 +247,7 @@ const itemsPerPage = ref(50);
 
 const itemCount = ref<number | null>(null);
 const totalItems = ref(0);
+const collectionError = computed(() => collectionValidation.validationError.value);
 
 const filterableFields = computed(() => {
 	return props.fields
@@ -382,8 +389,16 @@ const handlePageChange = (page: number) => {
 };
 
 const loadItemCount = async () => {
+	const validation = collectionValidation.validateCollection(props.collection);
+	if (!validation.isValid) {
+		itemCount.value = null;
+		return;
+	}
+
+	collectionValidation.clearValidationError();
+
 	try {
-		const response = await api.get(`/items/${props.collection}`, {
+		const response = await api.get(`/items/${validation.sanitized}`, {
 			params: {
 				limit: 0,
 				meta: 'total_count',
@@ -391,6 +406,7 @@ const loadItemCount = async () => {
 		});
 		itemCount.value = response.data?.meta?.total_count || 0;
 	} catch (error) {
+		collectionValidation.validationError.value = '集合统计加载失败，请稍后重试';
 		console.error('Failed to load item count:', error);
 	}
 };
@@ -470,6 +486,10 @@ onMounted(() => {
 	flex: 1;
 	overflow: auto;
 	padding: 20px;
+}
+
+.collection-error-notice {
+	margin-bottom: 16px;
 }
 
 .table-view {

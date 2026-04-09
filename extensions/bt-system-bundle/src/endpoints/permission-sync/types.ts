@@ -35,6 +35,12 @@ export interface UserLibraryPermission {
 	user_id: string;
 
 	/**
+	 * Directus 角色 ID（对应 directus_roles.id）
+	 * 启用权限同步时必须提供，不能再复用 user_id。
+	 */
+	role_id?: string | null;
+
+	/**
 	 * 库 ID（对应 ds-libraries 表）
 	 */
 	library_id: string;
@@ -96,7 +102,7 @@ export interface DirectusPermission {
 	id?: number;
 
 	/**
-	 * 角色 ID（null 表示管理员）
+	 * 角色 ID（对应 directus_roles.id，null 表示管理员）
 	 */
 	role: string | null;
 

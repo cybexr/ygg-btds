@@ -72,28 +72,28 @@
 
 					<v-button
 						v-if="hasDsManagerRole"
-						v-tooltip="'清空库表'"
-						icon
+						v-tooltip="'⚠️ 危险操作：此操作将清空所有数据且不可恢复'"
 						x-small
-						class="danger-action"
+						class="danger-action danger-action--truncate"
 						@click="confirmTruncate(item)"
 					>
 						<template #icon>
-							<v-icon name="delete_sweep" />
+							<v-icon name="warning" />
 						</template>
+						<span class="danger-action__label">清空</span>
 					</v-button>
 
 					<v-button
 						v-if="hasDsManagerRole"
-						v-tooltip="'删除数据集'"
-						icon
+						v-tooltip="'⚠️ 危险操作：此操作将永久删除数据集且不可恢复'"
 						x-small
-						class="danger-action"
+						class="danger-action danger-action--delete"
 						@click="confirmDelete(item)"
 					>
 						<template #icon>
-							<v-icon name="delete" />
+							<v-icon name="warning" />
 						</template>
+						<span class="danger-action__label">删除</span>
 					</v-button>
 				</div>
 			</template>
@@ -142,44 +142,90 @@
 		</v-notice>
 
 		<v-dialog v-model="truncateDialog" @update:model-value="handleTruncateDialogClose">
-			<v-card>
-				<v-card-title>确认清空库表</v-card-title>
+			<v-card class="danger-dialog">
+				<v-card-title class="danger-dialog__title">
+					<v-icon name="warning" class="danger-dialog__title-icon" />
+					<div>
+						<div>确认清空库表</div>
+						<p class="danger-dialog__headline">此操作不可恢复，请完成二次确认后继续。</p>
+					</div>
+				</v-card-title>
 				<v-card-text>
-					您确定要清空数据集 <strong>{{ selectedItem?.display_name }}</strong> 的所有数据吗？
-					<v-notice type="warning">
-						此操作将删除表中的所有记录，但保留表结构和元数据。此操作不可撤销。
+					<p>
+						您确定要清空数据集 <strong>{{ selectedItem?.display_name }}</strong> 的所有数据吗？
+					</p>
+					<v-notice type="warning" class="danger-dialog__notice">
+						此操作将删除 <strong>{{ formatNumber(selectedItem?.record_count ?? 0) }}</strong> 条记录，但保留表结构和元数据。此操作不可恢复。
 					</v-notice>
+					<div class="danger-dialog__impact">
+						<span>目标集合：{{ selectedItem?.collection_name }}</span>
+						<span>影响记录：{{ formatNumber(selectedItem?.record_count ?? 0) }}</span>
+					</div>
+					<div class="danger-dialog__confirmation">
+						<label class="danger-dialog__label" for="truncate-confirm-input">
+							请输入数据集名称 <strong>{{ selectedItem?.display_name }}</strong> 以确认清空
+						</label>
+						<v-input
+							id="truncate-confirm-input"
+							v-model="confirmationInput"
+							placeholder="输入数据集名称后才可继续"
+						/>
+					</div>
 				</v-card-text>
 				<v-card-actions>
 					<v-button @click="truncateDialog = false">取消</v-button>
 					<v-button
 						:loading="actionLoading"
 						color="danger"
+						:disabled="!canConfirmDangerAction"
 						@click="executeTruncate"
 					>
-						确认清空
+						{{ confirmButtonLabel('确认清空') }}
 					</v-button>
 				</v-card-actions>
 			</v-card>
 		</v-dialog>
 
 		<v-dialog v-model="deleteDialog" @update:model-value="handleDeleteDialogClose">
-			<v-card>
-				<v-card-title>确认删除数据集</v-card-title>
+			<v-card class="danger-dialog">
+				<v-card-title class="danger-dialog__title">
+					<v-icon name="warning" class="danger-dialog__title-icon" />
+					<div>
+						<div>确认删除数据集</div>
+						<p class="danger-dialog__headline">此操作将删除数据表和元数据，无法撤销。</p>
+					</div>
+				</v-card-title>
 				<v-card-text>
-					您确定要删除数据集 <strong>{{ selectedItem?.display_name }}</strong> 吗？
-					<v-notice type="danger">
-						此操作将删除数据表和所有元数据记录，此操作不可撤销。
+					<p>
+						您确定要删除数据集 <strong>{{ selectedItem?.display_name }}</strong> 吗？
+					</p>
+					<v-notice type="danger" class="danger-dialog__notice">
+						此操作将删除数据表和所有元数据记录，并影响依赖该数据集的访问入口。此操作不可恢复。
 					</v-notice>
+					<div class="danger-dialog__impact">
+						<span>目标集合：{{ selectedItem?.collection_name }}</span>
+						<span>当前记录：{{ formatNumber(selectedItem?.record_count ?? 0) }}</span>
+					</div>
+					<div class="danger-dialog__confirmation">
+						<label class="danger-dialog__label" for="delete-confirm-input">
+							请输入数据集名称 <strong>{{ selectedItem?.display_name }}</strong> 以确认删除
+						</label>
+						<v-input
+							id="delete-confirm-input"
+							v-model="confirmationInput"
+							placeholder="输入数据集名称后才可继续"
+						/>
+					</div>
 				</v-card-text>
 				<v-card-actions>
 					<v-button @click="deleteDialog = false">取消</v-button>
 					<v-button
 						:loading="actionLoading"
 						color="danger"
+						:disabled="!canConfirmDangerAction"
 						@click="executeDelete"
 					>
-						确认删除
+						{{ confirmButtonLabel('确认删除') }}
 					</v-button>
 				</v-card-actions>
 			</v-card>
@@ -192,7 +238,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 import { useApi, useUserStore } from '@directus/extensions-sdk';
 
 interface Dataset {
@@ -231,6 +277,8 @@ const itemsPerPage = ref(50);
 const truncateDialog = ref(false);
 const deleteDialog = ref(false);
 const selectedItem = ref<Dataset | null>(null);
+const confirmationInput = ref('');
+const confirmCountdown = ref(0);
 
 const toast = ref({
 	show: false,
@@ -261,6 +309,16 @@ const hasDsManagerRole = computed(() => {
 
 	const roleName = user.role.name || user.role;
 	return roleName === 'ds-manager' || roleName === 'Administrator';
+});
+
+let confirmCountdownTimer: ReturnType<typeof setInterval> | null = null;
+
+const canConfirmDangerAction = computed(() => {
+	return Boolean(
+		selectedItem.value &&
+		confirmationInput.value === selectedItem.value.display_name &&
+		confirmCountdown.value === 0
+	);
 });
 
 const filteredDatasets = computed(() => {
@@ -335,6 +393,8 @@ const toggleVisibility = async (dataset: Dataset) => {
 
 const confirmTruncate = (dataset: Dataset) => {
 	selectedItem.value = dataset;
+	resetDangerConfirmation();
+	startDangerCountdown();
 	truncateDialog.value = true;
 };
 
@@ -359,6 +419,8 @@ const executeTruncate = async () => {
 
 const confirmDelete = (dataset: Dataset) => {
 	selectedItem.value = dataset;
+	resetDangerConfirmation();
+	startDangerCountdown();
 	deleteDialog.value = true;
 };
 
@@ -395,14 +457,14 @@ const handleItemsPerPageChange = () => {
 
 const handleTruncateDialogClose = (value: boolean) => {
 	if (!value) {
-		selectedItem.value = null;
+		resetDangerDialogState();
 	}
 	truncateDialog.value = value;
 };
 
 const handleDeleteDialogClose = (value: boolean) => {
 	if (!value) {
-		selectedItem.value = null;
+		resetDangerDialogState();
 	}
 	deleteDialog.value = value;
 };
@@ -456,8 +518,52 @@ const formatDate = (dateString: string) => {
 	}).format(date);
 };
 
+const resetDangerConfirmation = () => {
+	confirmationInput.value = '';
+	confirmCountdown.value = 3;
+};
+
+const clearDangerCountdown = () => {
+	if (confirmCountdownTimer) {
+		clearInterval(confirmCountdownTimer);
+		confirmCountdownTimer = null;
+	}
+};
+
+const startDangerCountdown = () => {
+	clearDangerCountdown();
+	confirmCountdownTimer = setInterval(() => {
+		if (confirmCountdown.value <= 1) {
+			confirmCountdown.value = 0;
+			clearDangerCountdown();
+			return;
+		}
+
+		confirmCountdown.value -= 1;
+	}, 1000);
+};
+
+const resetDangerDialogState = () => {
+	clearDangerCountdown();
+	confirmationInput.value = '';
+	confirmCountdown.value = 0;
+	selectedItem.value = null;
+};
+
+const confirmButtonLabel = (label: string) => {
+	if (confirmCountdown.value > 0) {
+		return `${label}（${confirmCountdown.value}s）`;
+	}
+
+	return label;
+};
+
 onMounted(() => {
 	fetchDatasets();
+});
+
+onBeforeUnmount(() => {
+	clearDangerCountdown();
 });
 </script>
 
@@ -494,12 +600,86 @@ onMounted(() => {
 	gap: 8px;
 	justify-content: center;
 	align-items: center;
+	flex-wrap: wrap;
 }
 
 .danger-action {
-	--v-button-background-color: var(--theme--danger-background);
-	--v-button-color: var(--theme--danger);
-	--v-button-background-color-hover: var(--theme--danger-background-hover);
+	--v-button-background-color: var(--theme--danger);
+	--v-button-color: var(--theme--foreground-inverted);
+	--v-button-background-color-hover: color-mix(in srgb, var(--theme--danger) 82%, black);
+	animation: danger-pulse 1.8s ease-in-out infinite;
+	box-shadow: 0 0 0 1px color-mix(in srgb, var(--theme--danger) 45%, white), 0 10px 24px rgba(201, 42, 42, 0.22);
+	font-weight: 700;
+}
+
+.danger-action__label {
+	letter-spacing: 0.04em;
+}
+
+.danger-action--truncate {
+	background-image: linear-gradient(135deg, color-mix(in srgb, var(--theme--danger) 88%, white), var(--theme--danger));
+}
+
+.danger-action--delete {
+	background-image: linear-gradient(135deg, var(--theme--danger), color-mix(in srgb, var(--theme--danger) 72%, black));
+}
+
+.danger-dialog__title {
+	display: flex;
+	align-items: flex-start;
+	gap: 12px;
+}
+
+.danger-dialog__title-icon {
+	color: var(--theme--danger);
+	font-size: 48px;
+	line-height: 1;
+}
+
+.danger-dialog__headline {
+	margin: 4px 0 0;
+	color: var(--theme--danger);
+	font-size: 18px;
+	font-weight: 700;
+}
+
+.danger-dialog__notice {
+	margin-top: 16px;
+}
+
+.danger-dialog__impact {
+	display: grid;
+	gap: 8px;
+	margin-top: 16px;
+	padding: 12px 16px;
+	border-radius: 12px;
+	background: color-mix(in srgb, var(--theme--danger) 10%, white);
+	color: var(--theme--danger);
+	font-size: 16px;
+	font-weight: 600;
+}
+
+.danger-dialog__confirmation {
+	margin-top: 20px;
+}
+
+.danger-dialog__label {
+	display: block;
+	margin-bottom: 8px;
+	font-size: 14px;
+	font-weight: 600;
+}
+
+@keyframes danger-pulse {
+	0%, 100% {
+		transform: translateY(0);
+		box-shadow: 0 0 0 1px color-mix(in srgb, var(--theme--danger) 45%, white), 0 10px 24px rgba(201, 42, 42, 0.22);
+	}
+
+	50% {
+		transform: translateY(-1px);
+		box-shadow: 0 0 0 1px color-mix(in srgb, var(--theme--danger) 55%, white), 0 14px 28px rgba(201, 42, 42, 0.28);
+	}
 }
 
 .pagination {

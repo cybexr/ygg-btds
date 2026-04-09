@@ -71,6 +71,9 @@ export enum TaskStatus {
  * 任务信息
  */
 export interface TaskInfo {
+	/**
+	 * 任务标识符，格式为 excel_<uuid-v4>。
+	 */
 	id: string;
 	status: TaskStatus;
 	created_at: string;
@@ -95,6 +98,9 @@ export interface UploadRequest {
  */
 export interface UploadResponse {
 	success: boolean;
+	/**
+	 * 上传任务 ID，格式为 excel_<uuid-v4>。
+	 */
 	task_id: string;
 	message: string;
 }
@@ -103,6 +109,9 @@ export interface UploadResponse {
  * 解析请求
  */
 export interface ParseRequest {
+	/**
+	 * 待解析任务 ID，格式为 excel_<uuid-v4>。
+	 */
 	task_id: string;
 }
 
@@ -118,6 +127,9 @@ export interface ParseResponse {
  * 创建集合请求
  */
 export interface CreateCollectionRequest {
+	/**
+	 * 已完成解析的任务 ID，格式为 excel_<uuid-v4>。
+	 */
 	task_id: string;
 	collection_name: string;
 	field_mappings: FieldMapping[];

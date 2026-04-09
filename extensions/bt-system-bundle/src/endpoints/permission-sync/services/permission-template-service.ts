@@ -538,16 +538,17 @@ export class PermissionTemplateService {
 		}
 
 		const permissions = await query;
+		const jsonCache = new Map<string, unknown>();
 
 		return permissions.map((p) => ({
 			id: p.id,
 			role: p.role,
 			collection: p.collection,
 			action: p.action,
-			permissions: p.permissions ? JSON.parse(p.permissions) : null,
-			validation: p.validation ? JSON.parse(p.validation) : null,
-			presets: p.presets ? JSON.parse(p.presets) : null,
-			fields: p.fields ? JSON.parse(p.fields) : null,
+			permissions: this.parseJsonField(p.permissions, 'permissions', jsonCache),
+			validation: this.parseJsonField(p.validation, 'validation', jsonCache),
+			presets: this.parseJsonField(p.presets, 'presets', jsonCache),
+			fields: this.parseJsonField(p.fields, 'fields', jsonCache),
 		}));
 	}
 
@@ -625,6 +626,35 @@ export class PermissionTemplateService {
 			JSON.stringify(a.validation) === JSON.stringify(b.validation) &&
 			JSON.stringify(a.presets) === JSON.stringify(b.presets)
 		);
+	}
+
+	/**
+	 * 安全解析 JSON 字段，并在单次查询内复用重复值的解析结果
+	 */
+	private parseJsonField<T = unknown>(
+		value: string | null | undefined,
+		fieldName: string,
+		cache?: Map<string, unknown>
+	): T | null {
+		if (!value) {
+			return null;
+		}
+
+		if (cache?.has(value)) {
+			return cache.get(value) as T;
+		}
+
+		try {
+			const parsed = JSON.parse(value) as T;
+			cache?.set(value, parsed);
+			return parsed;
+		} catch (error) {
+			console.warn(
+				`[PermissionTemplateService] Failed to parse ${fieldName}, using null fallback.`,
+				error
+			);
+			return null;
+		}
 	}
 
 	/**

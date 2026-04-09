@@ -16,6 +16,7 @@
 		"build": "directus-extension build",
 		"dev": "directus-extension build -w",
 		"test": "vitest",
+		"test:security": "vitest run src/endpoints/excel-importer/__tests__/security.test.ts src/endpoints/permission-sync/__tests__/security.test.ts",
 		"test:ui": "vitest --ui",
 		"test:coverage": "vitest --coverage"
 	},

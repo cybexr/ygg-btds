@@ -331,4 +331,94 @@ describe('权限同步功能集成测试', () => {
 		expect(rollbackPoints).toBeDefined();
 		expect(Array.isArray(rollbackPoints)).toBe(true);
 	});
+
+	it('应该在权限 JSON 损坏时优雅降级为 null', async () => {
+		const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		const rows = [
+			{
+				id: 1,
+				role: 'role-123',
+				collection: 'bt_test',
+				action: 'read',
+				permissions: '{"allow":["*"]}',
+				validation: '{invalid-json',
+				presets: null,
+				fields: '["id","name"]',
+			},
+		];
+
+		const query = {
+			where: vi.fn().mockReturnThis(),
+			whereNull: vi.fn().mockReturnThis(),
+			then: (resolve: (value: typeof rows) => void) => resolve(rows),
+		};
+		const database = vi.fn(() => query) as any;
+		const testService = new PermissionTemplateService(database);
+
+		const permissions = await (testService as any).getCurrentPermissions('bt_test', null);
+
+		expect(permissions).toEqual([
+			{
+				id: 1,
+				role: 'role-123',
+				collection: 'bt_test',
+				action: 'read',
+				permissions: { allow: ['*'] },
+				validation: null,
+				presets: null,
+				fields: ['id', 'name'],
+			},
+		]);
+		expect(query.whereNull).toHaveBeenCalledWith('role');
+		expect(warnSpy).toHaveBeenCalledWith(
+			'[PermissionTemplateService] Failed to parse validation, using null fallback.',
+			expect.any(SyntaxError)
+		);
+	});
+
+	it('应该缓存重复的 JSON 字符串避免重复解析', async () => {
+		const repeatedPermissions = '{"allow":["*"]}';
+		const repeatedFields = '["id","name"]';
+		const rows = [
+			{
+				id: 1,
+				role: 'role-123',
+				collection: 'bt_test',
+				action: 'read',
+				permissions: repeatedPermissions,
+				validation: null,
+				presets: null,
+				fields: repeatedFields,
+			},
+			{
+				id: 2,
+				role: 'role-123',
+				collection: 'bt_test',
+				action: 'update',
+				permissions: repeatedPermissions,
+				validation: null,
+				presets: null,
+				fields: repeatedFields,
+			},
+		];
+
+		const query = {
+			where: vi.fn().mockReturnThis(),
+			whereNull: vi.fn().mockReturnThis(),
+			then: (resolve: (value: typeof rows) => void) => resolve(rows),
+		};
+		const database = vi.fn(() => query) as any;
+		const testService = new PermissionTemplateService(database);
+		const originalParse = JSON.parse;
+		const parseSpy = vi.spyOn(JSON, 'parse').mockImplementation(((value: string) => {
+			return originalParse(value);
+		}) as typeof JSON.parse);
+
+		const permissions = await (testService as any).getCurrentPermissions('bt_test', null);
+
+		expect(permissions).toHaveLength(2);
+		expect(parseSpy).toHaveBeenCalledTimes(2);
+
+		parseSpy.mockRestore();
+	});
 });

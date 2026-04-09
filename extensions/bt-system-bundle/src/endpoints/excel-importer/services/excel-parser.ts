@@ -15,6 +15,9 @@ export interface ExcelParserConfig {
 	skip_empty_rows?: boolean; // 是否跳过空行
 	header_row?: number; // 表头行索引（从 0 开始）
 	type_inference?: TypeInferenceConfig; // 类型推断配置
+	timeout_ms?: number; // 解析超时时间
+	max_cells?: number; // 最大单元格数量
+	max_file_bytes?: number; // 最大文件大小
 }
 
 /**
@@ -25,6 +28,9 @@ const DEFAULT_CONFIG: Required<ExcelParserConfig> = {
 	max_sheets: 10,
 	skip_empty_rows: true,
 	header_row: 0,
+	timeout_ms: 30_000,
+	max_cells: 1_000_000,
+	max_file_bytes: 10 * 1024 * 1024,
 	type_inference: {
 		max_sample_size: 100,
 		strict_mode: false,
@@ -49,49 +55,41 @@ export async function parseExcelFile(
 	options: ParseOptions = {}
 ): Promise<ExcelParseResult> {
 	const mergedConfig = { ...DEFAULT_CONFIG, ...config };
+	const normalizedFile = await normalizeFileInput(file);
 
-	// 读取工作簿
-	const workbook = await readWorkbook(file);
-
-	// 获取要解析的工作表
-	let sheetNames = options.sheetNames || workbook.SheetNames;
-	if (options.sheetIndex !== undefined) {
-		sheetNames = [workbook.SheetNames[options.sheetIndex]];
+	if (normalizedFile.buffer.byteLength > mergedConfig.max_file_bytes) {
+		throw new Error('文件超过解析器允许的大小限制');
 	}
 
-	// 限制工作表数量
-	sheetNames = sheetNames.slice(0, mergedConfig.max_sheets);
+	return withTimeout(async () => {
+		const workbook = readWorkbook(normalizedFile.buffer);
 
-	// 解析每个工作表
-	const sheets: SheetParseResult[] = [];
-	for (const sheetName of sheetNames) {
-		const sheetResult = await parseSheet(workbook, sheetName, mergedConfig);
-		sheets.push(sheetResult);
-	}
+		let sheetNames = options.sheetNames || workbook.SheetNames;
+		if (options.sheetIndex !== undefined) {
+			sheetNames = [workbook.SheetNames[options.sheetIndex]];
+		}
 
-	// 获取文件名
-	const fileName = file instanceof File ? file.name : 'unknown.xlsx';
+		sheetNames = sheetNames.slice(0, mergedConfig.max_sheets);
 
-	return {
-		file_name: fileName,
-		sheet_count: sheets.length,
-		sheets,
-	};
+		const sheets: SheetParseResult[] = [];
+		for (const sheetName of sheetNames) {
+			const sheetResult = parseSheet(workbook, sheetName, mergedConfig);
+			sheets.push(sheetResult);
+		}
+
+		return {
+			file_name: normalizedFile.fileName,
+			sheet_count: sheets.length,
+			sheets,
+		};
+	}, mergedConfig.timeout_ms);
 }
 
 /**
  * 读取工作簿
  */
-async function readWorkbook(file: File | Buffer | ArrayBuffer): Promise<XLSX.WorkBook> {
-	let buffer: Buffer | ArrayBuffer;
-
-	if (file instanceof File) {
-		buffer = await file.arrayBuffer();
-	} else {
-		buffer = file;
-	}
-
-	return XLSX.read(buffer, {
+function readWorkbook(file: Buffer | ArrayBuffer): XLSX.WorkBook {
+	return XLSX.read(file, {
 		type: 'array',
 		cellDates: true, // 解析日期
 		cellText: false, // 不转换为文本
@@ -121,6 +119,11 @@ function parseSheet(
 
 	if (jsonData.length === 0) {
 		return createEmptySheetResult(sheetName);
+	}
+
+	const totalCells = jsonData.reduce((count, row) => count + row.length, 0);
+	if (totalCells > config.max_cells) {
+		throw new Error(`工作表 "${sheetName}" 超过最大单元格限制`);
 	}
 
 	// 提取表头
@@ -211,7 +214,7 @@ function createEmptySheetResult(sheetName: string): SheetParseResult {
  * 获取工作表列表
  */
 export function getSheetNames(file: File | Buffer | ArrayBuffer): Promise<string[]> {
-	return readWorkbook(file).then((workbook) => workbook.SheetNames);
+	return normalizeFileInput(file).then((normalizedFile) => readWorkbook(normalizedFile.buffer).SheetNames);
 }
 
 /**
@@ -231,6 +234,41 @@ export function validateExcelFile(file: File | { name: string; type: string }): 
 	}
 
 	return { valid: true };
+}
+
+async function normalizeFileInput(
+	file: File | Buffer | ArrayBuffer
+): Promise<{ buffer: Buffer | ArrayBuffer; fileName: string }> {
+	if (file instanceof File) {
+		return {
+			buffer: await file.arrayBuffer(),
+			fileName: file.name,
+		};
+	}
+
+	return {
+		buffer: file,
+		fileName: 'unknown.xlsx',
+	};
+}
+
+async function withTimeout<T>(operation: () => Promise<T> | T, timeoutMs: number): Promise<T> {
+	let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+
+	try {
+		return await Promise.race([
+			Promise.resolve(operation()),
+			new Promise<T>((_, reject) => {
+				timeoutHandle = setTimeout(() => {
+					reject(new Error(`Excel 解析超时（>${timeoutMs}ms）`));
+				}, timeoutMs);
+			}),
+		]);
+	} finally {
+		if (timeoutHandle) {
+			clearTimeout(timeoutHandle);
+		}
+	}
 }
 
 /**

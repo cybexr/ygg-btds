@@ -3,6 +3,7 @@
  * 负责处理 Excel 文件上传、解析、集合创建和数据导入
  */
 
+import { randomUUID } from 'crypto';
 import {
 	ExcelParseResult,
 	FieldMapping,
@@ -169,9 +170,9 @@ export class ExcelImportService {
 	}
 
 	/**
-	 * 生成任务 ID
+	 * 生成带业务前缀的 UUID v4 任务 ID
 	 */
 	private generateTaskId(): string {
-		return `excel_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+		return `excel_${randomUUID()}`;
 	}
 }

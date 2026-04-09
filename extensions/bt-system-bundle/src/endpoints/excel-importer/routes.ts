@@ -1,14 +1,29 @@
 import { Router, Request, Response } from 'express';
 import { UploadedFile } from 'express-fileupload';
 import { ExcelImportService } from '../../shared/services/excel-import-service';
+import { fileUploadConfig, FileUploadConfig } from './config';
+import { validateExcelFile } from './utils/file-validator';
+import { VirusScanner, createVirusScanner } from './utils/virus-scanner';
 
 const excelService = new ExcelImportService();
+const virusScanner = createVirusScanner();
 
-export function registerRoutes(router: Router): void {
-	const BASE_PATH = '/custom/excel';
+interface RouteDependencies {
+	excelService: Pick<ExcelImportService, 'createUploadTask'>;
+	config: FileUploadConfig;
+	virusScanner: VirusScanner;
+}
 
-	// POST /custom/excel/upload - 上传 Excel 文件
-	router.post(`${BASE_PATH}/upload`, async (req: Request, res: Response) => {
+const DEFAULT_ROUTE_DEPENDENCIES: RouteDependencies = {
+	excelService,
+	config: fileUploadConfig,
+	virusScanner,
+};
+
+export function createUploadHandler(
+	dependencies: RouteDependencies = DEFAULT_ROUTE_DEPENDENCIES
+) {
+	return async (req: Request, res: Response) => {
 		try {
 			if (!req.files || !req.files.file) {
 				return res.status(400).json({
@@ -19,10 +34,10 @@ export function registerRoutes(router: Router): void {
 
 			const uploadedFile = req.files.file as UploadedFile;
 
-			// 验证文件类型
 			const allowedMimeTypes = [
 				'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 				'application/vnd.ms-excel',
+				'application/octet-stream',
 			];
 
 			if (!allowedMimeTypes.includes(uploadedFile.mimetype)) {
@@ -32,32 +47,68 @@ export function registerRoutes(router: Router): void {
 				});
 			}
 
-			// 验证文件大小（10MB 限制）
-			const MAX_FILE_SIZE = 10 * 1024 * 1024;
-			if (uploadedFile.size > MAX_FILE_SIZE) {
+			const validationResult = await withTimeout(
+				() =>
+					validateExcelFile(uploadedFile, {
+						maxFileSizeBytes: dependencies.config.maxFileSizeBytes,
+					}),
+				dependencies.config.validationTimeoutMs
+			);
+			if (!validationResult.valid) {
+				const issue = validationResult.issues[0];
+				console.warn('Rejected excel upload', {
+					fileName: validationResult.sanitizedFileName,
+					reason: issue?.code,
+				});
 				return res.status(400).json({
-					error: 'FILE_TOO_LARGE',
-					message: '文件大小不能超过 10MB',
+					error: issue?.code || 'INVALID_FILE',
+					message: issue?.message || '文件安全校验失败',
 				});
 			}
 
-			// 创建上传任务
-			const taskId = await excelService.createUploadTask(uploadedFile);
+			if (dependencies.config.enableVirusScan) {
+				const scanResult = await withTimeout(
+					() =>
+						dependencies.virusScanner.scanFile(
+							validationResult.sanitizedFileName,
+							uploadedFile.data
+						),
+					dependencies.config.virusScanTimeoutMs
+				);
+				if (!scanResult.clean) {
+					return res.status(400).json({
+						error: 'VIRUS_DETECTED',
+						message: scanResult.threat || '文件未通过病毒扫描',
+					});
+				}
+			}
 
-			res.json({
+			const taskId = await dependencies.excelService.createUploadTask({
+				...uploadedFile,
+				name: validationResult.sanitizedFileName,
+			});
+
+			return res.json({
 				success: true,
 				task_id: taskId,
 				message: '文件上传成功',
 			});
 		} catch (error) {
 			console.error('Upload error:', error);
-			res.status(500).json({
+			return res.status(500).json({
 				error: 'UPLOAD_FAILED',
 				message: '文件上传失败',
 				details: error instanceof Error ? error.message : '未知错误',
 			});
 		}
-	});
+	};
+}
+
+export function registerRoutes(router: Router): void {
+	const BASE_PATH = '/custom/excel';
+
+	// POST /custom/excel/upload - 上传 Excel 文件
+	router.post(`${BASE_PATH}/upload`, createUploadHandler());
 
 	// POST /custom/excel/parse - 解析表头和类型推断
 	router.post(`${BASE_PATH}/parse`, async (req: Request, res: Response) => {
@@ -270,4 +321,23 @@ export function registerRoutes(router: Router): void {
 			});
 		}
 	});
+}
+
+async function withTimeout<T>(operation: () => Promise<T>, timeoutMs: number): Promise<T> {
+	let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+
+	try {
+		return await Promise.race([
+			operation(),
+			new Promise<T>((_, reject) => {
+				timeoutHandle = setTimeout(() => {
+					reject(new Error(`处理超时（>${timeoutMs}ms）`));
+				}, timeoutMs);
+			}),
+		]);
+	} finally {
+		if (timeoutHandle) {
+			clearTimeout(timeoutHandle);
+		}
+	}
 }

@@ -6,6 +6,7 @@
 				<v-input
 					v-model="searchQuery"
 					placeholder="搜索所有字段..."
+					aria-label="搜索数据集项目"
 					clearable
 					@update:model-value="onSearchChange"
 				>
@@ -15,7 +16,7 @@
 				</v-input>
 			</div>
 
-			<div class="table-info">
+			<div class="table-info" role="status" aria-live="polite">
 				<span v-if="totalItems > 0" class="info-text">
 					{{ formatNumber(startIndex + 1) }}-{{ formatNumber(Math.min(endIndex, totalItems)) }}
 					/ {{ formatNumber(totalItems) }} 项
@@ -33,6 +34,7 @@
 				:items="paginatedItems"
 				:columns="tableColumns"
 				:loading="loading"
+				aria-label="数据集项目表格"
 				fixed-header
 				show-sort
 				show-select
@@ -45,6 +47,7 @@
 						v-tooltip="'编辑'"
 						icon
 						x-small
+						aria-label="编辑项目"
 						@click="handleEdit(item)"
 					>
 						<template #icon>
@@ -56,6 +59,7 @@
 						icon
 						x-small
 						class="danger-action"
+						aria-label="删除项目"
 						@click="handleDelete(item)"
 					>
 						<template #icon>
@@ -67,7 +71,7 @@
 		</div>
 
 		<!-- Empty State -->
-		<div v-if="!loading && paginatedItems.length === 0" class="empty-state">
+		<div v-if="!loading && paginatedItems.length === 0" class="empty-state" role="status" aria-live="polite">
 			<v-empty
 				v-if="searchQuery"
 				icon="search_off"
@@ -89,6 +93,7 @@
 				:length="totalPages"
 				:total-items="totalItems"
 				:items-per-page="itemsPerPage"
+				aria-label="数据分页"
 				show-first-last
 				@update:page="handlePageChange"
 			/>

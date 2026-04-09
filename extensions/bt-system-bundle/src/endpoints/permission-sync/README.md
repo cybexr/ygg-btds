@@ -22,6 +22,7 @@
   "user_library_permissions": [
     {
       "user_id": "user-uuid",
+      "role_id": "12",
       "library_id": "library-uuid",
       "template": "ds-descriptor-crud",
       "enabled": true,
@@ -110,6 +111,7 @@
 ```typescript
 interface UserLibraryPermission {
   user_id: string;           // 用户 ID
+  role_id?: string | null;   // Directus 角色 ID，启用同步时必填
   library_id: string;        // 库 ID
   template: PermissionTemplate;  // 权限模板
   enabled: boolean;          // 是否启用
@@ -132,7 +134,7 @@ interface PermissionConfig {
 ```typescript
 interface DirectusPermission {
   id?: number;
-  role: string | null;              // 角色 ID
+  role: string | null;              // 角色 ID（directus_roles.id）
   collection: string;               // 集合名称
   action: PermissionAction;         // 权限动作
   permissions: Record<string, any> | null;
@@ -183,6 +185,7 @@ const syncPermissions = async () => {
       user_library_permissions: [
         {
           user_id: 'user-123',
+          role_id: '12',
           library_id: 'library-456',
           template: 'ds-descriptor-crud',
           enabled: true,
@@ -204,6 +207,7 @@ const previewPermissions = async () => {
       user_library_permissions: [
         {
           user_id: 'user-123',
+          role_id: '34',
           library_id: 'library-456',
           template: 'ds-reader-read',
           enabled: true,

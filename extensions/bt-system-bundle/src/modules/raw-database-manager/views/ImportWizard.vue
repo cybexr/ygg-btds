@@ -150,9 +150,15 @@
 
 							<v-progress
 								v-if="taskStatus?.status === 'processing'"
-								:value="taskStatus.progress || 0"
-								:indeterminate="taskStatus.progress === undefined"
+								:value="progressValue"
+								:indeterminate="isProgressIndeterminate"
 							/>
+
+							<div v-if="taskStatus?.status === 'processing'" class="progress-summary">
+								<div class="progress-percentage">{{ progressPercentage }}</div>
+								<div class="progress-text">{{ progressText }}</div>
+								<div class="estimated-time">预计剩余时间：{{ estimatedTimeRemaining }}</div>
+							</div>
 
 							<div class="progress-stats">
 								<div class="stat-item">
@@ -278,9 +284,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue';
-import { useRouter } from 'vue-router';
+import { ref, computed, onUnmounted } from 'vue';
 import { useApi } from '@directus/extensions-sdk';
+import {
+	getProgressPercentage,
+	getProgressValue,
+	getProgressText,
+	isProgressIndeterminate as getIsProgressIndeterminate,
+	getEstimatedTimeRemaining,
+} from './import-progress';
 
 const emit = defineEmits<{
 	(e: 'close'): void;
@@ -324,7 +336,6 @@ interface TaskStatus {
 	duration?: number;
 }
 
-const router = useRouter();
 const api = useApi();
 
 // 步骤定义
@@ -348,6 +359,8 @@ const collectionNameError = ref('');
 const taskStatus = ref<TaskStatus | null>(null);
 const pollingInterval = ref<NodeJS.Timeout | null>(null);
 const fileInput = ref<HTMLInputElement | null>(null);
+const taskStartTime = ref<number | null>(null);
+const lastProgressUpdateAt = ref<number | null>(null);
 
 // 计算属性
 const canProceed = computed(() => {
@@ -380,6 +393,24 @@ const nextButtonText = computed(() => {
 		default:
 			return '下一步';
 	}
+});
+
+const progressPercentage = computed(() => {
+	return getProgressPercentage(taskStatus.value);
+});
+
+const progressValue = computed(() => getProgressValue(taskStatus.value));
+
+const isProgressIndeterminate = computed(() => {
+	return getIsProgressIndeterminate(taskStatus.value);
+});
+
+const progressText = computed(() => {
+	return getProgressText(taskStatus.value);
+});
+
+const estimatedTimeRemaining = computed(() => {
+	return getEstimatedTimeRemaining(taskStatus.value, taskStartTime.value, lastProgressUpdateAt.value);
 });
 
 // 文件处理
@@ -557,6 +588,8 @@ const startImport = async () => {
 
 // 状态轮询
 const startPolling = () => {
+	taskStartTime.value = Date.now();
+	lastProgressUpdateAt.value = taskStartTime.value;
 	pollTaskStatus();
 	pollingInterval.value = setInterval(pollTaskStatus, 2000);
 };
@@ -567,6 +600,7 @@ const pollTaskStatus = async () => {
 
 		if (response.data.success) {
 			taskStatus.value = response.data.data;
+			lastProgressUpdateAt.value = Date.now();
 
 			if (
 				taskStatus.value.status === 'completed' ||
@@ -956,6 +990,29 @@ onUnmounted(() => {
 
 .progress-status {
 	margin-bottom: 32px;
+}
+
+.progress-summary {
+	margin-top: 24px;
+}
+
+.progress-percentage {
+	font-size: 48px;
+	font-weight: 700;
+	line-height: 1;
+	color: var(--theme--primary);
+}
+
+.progress-text {
+	margin-top: 12px;
+	font-size: 16px;
+	color: var(--theme--foreground);
+}
+
+.estimated-time {
+	margin-top: 8px;
+	font-size: 14px;
+	color: var(--theme--foreground-subdued);
 }
 
 .progress-status .v-icon {
