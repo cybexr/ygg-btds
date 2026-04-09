@@ -1,0 +1,30 @@
+{
+  "name": "ygg-btds",
+  "version": "1.0.0",
+  "description": "小团队业务数据集管理系统 (BTDMS) - 基于 Directus v11 Extension Bundle",
+  "type": "module",
+  "scripts": {
+    "dev": "directus start",
+    "test:e2e": "cd tests && npm run test:e2e",
+    "test:e2e:install": "cd tests && npm install && npm run test:e2e:install",
+    "test:setup": "node -e \"const fs=require('fs');fs.mkdirSync('./data',{recursive:true});\"",
+    "test:verify": "cd tests && npm run verify",
+    "test:mock-data": "python3 ./tests/scripts/generate-mock-data.py"
+  },
+  "keywords": [
+    "directus",
+    "extension",
+    "dataset-management",
+    "btdms"
+  ],
+  "author": "YGG",
+  "license": "MIT",
+  "devDependencies": {
+    "@directus/extensions-sdk": "^11.0.0",
+    "typescript": "^5.3.3",
+    "vue": "^3.3.0"
+  },
+  "dependencies": {
+    "directus": "^11.0.0"
+  }
+}
