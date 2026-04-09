@@ -73,6 +73,8 @@ export enum TaskStatus {
 export interface TaskInfo {
 	/**
 	 * 任务标识符，格式为 excel_<uuid-v4>。
+	 * UUID v4 使用 RFC 4122 标准格式（xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx），
+	 * 由 crypto.randomUUID() 生成，确保密码学安全的随机性和唯一性。
 	 */
 	id: string;
 	status: TaskStatus;
@@ -100,6 +102,7 @@ export interface UploadResponse {
 	success: boolean;
 	/**
 	 * 上传任务 ID，格式为 excel_<uuid-v4>。
+	 * UUID v4 使用 RFC 4122 标准格式，由 crypto.randomUUID() 生成。
 	 */
 	task_id: string;
 	message: string;
@@ -111,6 +114,7 @@ export interface UploadResponse {
 export interface ParseRequest {
 	/**
 	 * 待解析任务 ID，格式为 excel_<uuid-v4>。
+	 * UUID v4 使用 RFC 4122 标准格式，由 crypto.randomUUID() 生成。
 	 */
 	task_id: string;
 }
@@ -129,6 +133,7 @@ export interface ParseResponse {
 export interface CreateCollectionRequest {
 	/**
 	 * 已完成解析的任务 ID，格式为 excel_<uuid-v4>。
+	 * UUID v4 使用 RFC 4122 标准格式，由 crypto.randomUUID() 生成。
 	 */
 	task_id: string;
 	collection_name: string;

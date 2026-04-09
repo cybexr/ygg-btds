@@ -29,6 +29,7 @@ export async function demoSimpleImport(database: Knex): Promise<void> {
 	console.log(`✅ 创建测试表: ${tableName}\n`);
 
 	// 2. 准备测试数据
+	// 注意：Math.random() 仅用于生成演示数据，不涉及安全敏感场景
 	const testData = Array.from({ length: 100 }, (_, i) => ({
 		row_number: i + 1,
 		data: {
@@ -85,7 +86,7 @@ export async function demoSimpleImport(database: Knex): Promise<void> {
 	// 7. 查看性能指标
 	const metrics = runner.getPerformanceMetrics(jobId);
 	if (metrics) {
-		console.log(`\n========== 性能指标 ==========');
+		console.log(console.log("\n========== 性能指标 ==========");
 		console.log(`平均批处理时间: ${metrics.averageBatchTime}ms`);
 		console.log(`总执行时间: ${metrics.totalDuration}ms`);
 	}
@@ -197,6 +198,7 @@ export async function demoJobControl(database: Knex): Promise<void> {
 	console.log(`✅ 创建测试表: ${tableName}\n`);
 
 	// 2. 准备大量数据
+	// 注意：Math.random() 仅用于生成演示数据，不涉及安全敏感场景
 	const testData = Array.from({ length: 500 }, (_, i) => ({
 		row_number: i + 1,
 		data: {

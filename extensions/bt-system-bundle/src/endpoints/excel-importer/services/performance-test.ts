@@ -8,6 +8,7 @@ import { Knex } from 'knex';
 
 /**
  * 生成测试数据
+ * 注意：Math.random() 仅用于生成测试数据，不涉及安全敏感场景
  */
 function generateTestData(rowCount: number): BatchDataItem[] {
 	const data: BatchDataItem[] = [];
