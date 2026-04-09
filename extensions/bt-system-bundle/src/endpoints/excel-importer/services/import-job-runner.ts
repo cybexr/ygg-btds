@@ -185,6 +185,9 @@ export class ImportJobRunner {
 	// 性能监控
 	private performanceMetrics: Map<number, JobPerformanceMetrics> = new Map();
 
+	// 队列处理锁，防止并发调用 processQueue
+	private isProcessingQueue: boolean = false;
+
 	constructor(database: Knex, maxConcurrentJobs?: number, cacheConfig?: CacheConfig) {
 		this.database = database;
 		if (maxConcurrentJobs) {
@@ -236,23 +239,37 @@ export class ImportJobRunner {
 		targetCollection: string,
 		onProgress?: ProgressCallback
 	): Promise<ImportResult> {
-		const job = await this.database('bt_import_jobs')
-			.where('id', jobId)
-			.first();
+		// 使用事务确保状态检查和更新的原子性，防止竞态条件
+		const startResult = await this.database.transaction(async (trx) => {
+			const job = await trx('bt_import_jobs')
+				.where('id', jobId)
+				.forUpdate() // 行级锁，防止并发修改
+				.first();
 
-		if (!job) {
-			throw new Error(`任务不存在: ${jobId}`);
-		}
+			if (!job) {
+				throw new Error(`任务不存在: ${jobId}`);
+			}
 
-		if (job.status !== ImportJobStatus.PENDING && job.status !== ImportJobStatus.PAUSED) {
-			throw new Error(`任务状态不正确，当前状态: ${job.status}`);
-		}
+			if (job.status !== ImportJobStatus.PENDING && job.status !== ImportJobStatus.PAUSED) {
+				throw new Error(`任务状态不正确，当前状态: ${job.status}`);
+			}
+
+			// 在事务中更新状态为运行中
+			const updateData: any = { status: ImportJobStatus.RUNNING, started_at: new Date() };
+			await trx('bt_import_jobs')
+				.where('id', jobId)
+				.update(updateData);
+
+			return job;
+		});
+
+		const job = startResult;
 
 		// 初始化性能监控
 		this.performanceMetrics.set(jobId, this.createPerformanceMetrics());
 
-		// 更新任务状态为运行中
-		await this.updateJobStatus(jobId, ImportJobStatus.RUNNING);
+		// 更新缓存状态
+		this.updateCachedJobStatus(jobId, ImportJobStatus.RUNNING);
 		this.activeJobs.set(jobId, true);
 
 		const batchSize = job.batch_size || 1000;
@@ -713,23 +730,41 @@ export class ImportJobRunner {
 	 * 处理任务队列
 	 */
 	private async processQueue(): Promise<void> {
-		while (this.jobQueue.length > 0 && this.processingCount < this.maxConcurrentJobs) {
-			const queueItem = this.jobQueue.shift();
-			if (!queueItem) break;
+		// 防止并发调用 processQueue
+		if (this.isProcessingQueue) {
+			return;
+		}
 
-			this.processingCount++;
+		this.isProcessingQueue = true;
 
-			// 异步处理任务
-			this.startImportJob(
-				queueItem.jobId,
-				queueItem.data,
-				queueItem.targetCollection,
-				queueItem.onProgress
-			)
-				.finally(() => {
-					this.processingCount--;
-					this.processQueue(); // 继续处理队列
-				});
+		try {
+			while (this.jobQueue.length > 0 && this.processingCount < this.maxConcurrentJobs) {
+				const queueItem = this.jobQueue.shift();
+				if (!queueItem) break;
+
+				this.processingCount++;
+
+				// 异步处理任务
+				this.startImportJob(
+					queueItem.jobId,
+					queueItem.data,
+					queueItem.targetCollection,
+					queueItem.onProgress
+				)
+					.finally(() => {
+						this.processingCount--;
+						// 使用 nextTick 避免栈溢出，并确保在下一个事件循环中处理队列
+						process.nextTick(() => {
+							this.isProcessingQueue = false;
+							this.processQueue(); // 继续处理队列
+						});
+					});
+			}
+		} finally {
+			// 只有在没有任务需要处理时才释放锁
+			if (this.jobQueue.length === 0 || this.processingCount >= this.maxConcurrentJobs) {
+				this.isProcessingQueue = false;
+			}
 		}
 	}
 
