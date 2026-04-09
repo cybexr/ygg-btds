@@ -132,6 +132,11 @@ interface JobPerformanceMetrics {
 	cacheMisses: number;
 	statusChecks: number;
 	cacheCheckTimes: number[];
+	batchInsertMetrics: {
+		mode: 'batch' | 'fallback';
+		duration: number;
+		itemCount: number;
+	}[];
 }
 
 /**
@@ -349,7 +354,12 @@ export class ImportJobRunner {
 	}
 
 	/**
-	 * 处理单个批次
+	 * 处理单个批次 - 使用批量插入优化性能
+	 *
+	 * 优化策略：
+	 * 1. 先尝试批量插入所有有效数据（减少数据库往返次数）
+	 * 2. 批量插入失败时降级到逐条插入模式以获取详细错误信息
+	 * 3. 在事务中执行确保数据一致性
 	 */
 	private async processBatch(
 		jobId: number,
@@ -360,34 +370,72 @@ export class ImportJobRunner {
 		const errors: ImportErrorRecord[] = [];
 		let successCount = 0;
 		let failureCount = 0;
+		const batchStartTime = Date.now();
 
 		// 使用事务处理批次
 		try {
 			await this.database.transaction(async (trx) => {
-				for (const item of batch) {
-					try {
-						// 插入数据到目标集合
-						await trx(targetCollection).insert(item.data);
-						successCount++;
-					} catch (error) {
-						failureCount++;
+				// 策略 1: 尝试批量插入所有数据
+				let batchInsertAttempted = false;
 
-						// 记录错误
-						const errorRecord: ImportErrorRecord = {
-							row_number: item.row_number,
-							sheet_name: sheetName,
-							error_type: this.getErrorType(error),
-							error_message: error instanceof Error ? error.message : '未知错误',
-							field_name: this.getFieldNameFromError(error),
-							row_data: item.data,
-							severity: this.getErrorSeverity(error),
-						};
+				try {
+					// 收集所有待插入的数据
+					const itemsToInsert = batch.map((item) => item.data);
 
-						errors.push(errorRecord);
+					if (itemsToInsert.length > 0) {
+						batchInsertAttempted = true;
 
-						// 保存错误到数据库
-						await this.saveError(jobId, errorRecord, trx);
+						// 批量插入 - 一次性插入所有数据
+						await trx(targetCollection).insert(itemsToInsert);
+
+						// 批量插入成功，所有项都成功
+						successCount = batch.length;
+
+						// 记录批量插入性能指标
+						const batchInsertTime = Date.now() - batchStartTime;
+						this.recordBatchInsertMetrics(jobId, 'batch', batchInsertTime, itemsToInsert.length);
 					}
+				} catch (batchError) {
+					// 批量插入失败，降级到逐条插入模式
+					const fallbackStartTime = Date.now();
+
+					if (batchInsertAttempted) {
+						// 记录批量插入失败，准备降级
+						console.warn(
+							`[ImportJobRunner] 批量插入失败，降级到逐条模式: ${batchError instanceof Error ? batchError.message : '未知错误'}`
+						);
+					}
+
+					// 策略 2: 降级到逐条插入以获取详细错误信息
+					for (const item of batch) {
+						try {
+							// 逐条插入数据
+							await trx(targetCollection).insert(item.data);
+							successCount++;
+						} catch (error) {
+							failureCount++;
+
+							// 记录详细错误信息
+							const errorRecord: ImportErrorRecord = {
+								row_number: item.row_number,
+								sheet_name: sheetName,
+								error_type: this.getErrorType(error),
+								error_message: error instanceof Error ? error.message : '未知错误',
+								field_name: this.getFieldNameFromError(error),
+								row_data: item.data,
+								severity: this.getErrorSeverity(error),
+							};
+
+							errors.push(errorRecord);
+
+							// 保存错误到数据库
+							await this.saveError(jobId, errorRecord, trx);
+						}
+					}
+
+					// 记录降级模式性能指标
+					const fallbackTime = Date.now() - fallbackStartTime;
+					this.recordBatchInsertMetrics(jobId, 'fallback', fallbackTime, batch.length);
 				}
 
 				// 如果有错误，更新任务的错误摘要
@@ -824,6 +872,7 @@ export class ImportJobRunner {
 			cacheMisses: 0,
 			statusChecks: 0,
 			cacheCheckTimes: [],
+			batchInsertMetrics: [],
 		};
 	}
 
@@ -899,5 +948,77 @@ export class ImportJobRunner {
 				)}%`
 			);
 		}
+	}
+
+	/**
+	 * 记录批量插入性能指标
+	 */
+	private recordBatchInsertMetrics(
+		jobId: number,
+		mode: 'batch' | 'fallback',
+		duration: number,
+		itemCount: number
+	): void {
+		const metrics = this.performanceMetrics.get(jobId);
+		if (!metrics) {
+			return;
+		}
+
+		metrics.batchInsertMetrics.push({
+			mode,
+			duration,
+			itemCount,
+		});
+
+		// 记录批量插入性能日志
+		const modeText = mode === 'batch' ? '批量' : '降级';
+		const avgTime = itemCount > 0 ? (duration / itemCount).toFixed(2) : '0';
+		console.info(
+			`[ImportJobRunner] job=${jobId} ${modeText}插入 ${itemCount} 条耗时 ${duration}ms (平均 ${avgTime}ms/条)`
+		);
+	}
+
+	/**
+	 * 获取批量插入性能统计
+	 */
+	getBatchInsertMetrics(
+		jobId: number
+	): {
+		batchCount: number;
+		fallbackCount: number;
+		avgBatchTime: number;
+		avgFallbackTime: number;
+		batchModeSuccessRate: number;
+	} | undefined {
+		const metrics = this.performanceMetrics.get(jobId);
+		if (!metrics || metrics.batchInsertMetrics.length === 0) {
+			return undefined;
+		}
+
+		const batchMetrics = metrics.batchInsertMetrics.filter((m) => m.mode === 'batch');
+		const fallbackMetrics = metrics.batchInsertMetrics.filter((m) => m.mode === 'fallback');
+
+		const batchCount = batchMetrics.length;
+		const fallbackCount = fallbackMetrics.length;
+
+		const avgBatchTime =
+			batchCount > 0
+				? batchMetrics.reduce((sum, m) => sum + m.duration, 0) / batchCount
+				: 0;
+		const avgFallbackTime =
+			fallbackCount > 0
+				? fallbackMetrics.reduce((sum, m) => sum + m.duration, 0) / fallbackCount
+				: 0;
+
+		const totalAttempts = batchCount + fallbackCount;
+		const batchModeSuccessRate = totalAttempts > 0 ? batchCount / totalAttempts : 0;
+
+		return {
+			batchCount,
+			fallbackCount,
+			avgBatchTime: Math.round(avgBatchTime),
+			avgFallbackTime: Math.round(avgFallbackTime),
+			batchModeSuccessRate,
+		};
 	}
 }
