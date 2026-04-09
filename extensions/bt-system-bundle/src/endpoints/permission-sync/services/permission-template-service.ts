@@ -328,7 +328,7 @@ export class PermissionTemplateService {
 	}
 
 	/**
-	 * 批量同步多个集合的权限
+	 * 批量同步多个集合的权限（并行处理）
 	 */
 	async batchSyncPermissions(
 		collections: string[],
@@ -336,19 +336,13 @@ export class PermissionTemplateService {
 		directusRoleId: string | null = null,
 		userId?: number
 	): Promise<PermissionSyncResult[]> {
-		const results: PermissionSyncResult[] = [];
-
-		for (const collection of collections) {
-			const result = await this.syncPermissions(
-				collection,
-				role,
-				directusRoleId,
-				userId
-			);
-			results.push(result);
-		}
-
-		return results;
+		// 使用 Promise.all 并行执行所有集合同步操作
+		// 每个集合同步操作相互独立，可以并行执行以提升性能
+		return Promise.all(
+			collections.map((collection) =>
+				this.syncPermissions(collection, role, directusRoleId, userId)
+			)
+		);
 	}
 
 	/**
