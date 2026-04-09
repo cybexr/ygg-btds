@@ -1,0 +1,84 @@
+{
+  "examples": [
+    {
+      "name": "订单状态统计（柱状图）",
+      "description": "按状态统计订单数量，使用柱状图展示",
+      "config": {
+        "collection": "orders",
+        "chartType": "bar",
+        "metricType": "count",
+        "groupBy": "status",
+        "colorScheme": "default",
+        "title": "订单状态分布",
+        "showLegend": true,
+        "showDataLabels": true,
+        "limit": 20
+      }
+    },
+    {
+      "name": "销售趋势分析（折线图）",
+      "description": "按月统计销售总额，使用折线图展示趋势",
+      "config": {
+        "collection": "orders",
+        "chartType": "line",
+        "metricType": "sum",
+        "metricField": "total_amount",
+        "groupBy": "created_month",
+        "colorScheme": "bright",
+        "title": "月度销售趋势",
+        "showLegend": true,
+        "showDataLabels": true,
+        "limit": 12
+      }
+    },
+    {
+      "name": "用户区域分布（饼图）",
+      "description": "按区域统计用户数量，使用饼图展示占比",
+      "config": {
+        "collection": "users",
+        "chartType": "pie",
+        "metricType": "count",
+        "groupBy": "region_code",
+        "groupByLabelField": "region_name",
+        "colorScheme": "pastel",
+        "title": "用户区域分布",
+        "showLegend": true,
+        "showDataLabels": false,
+        "limit": 10
+      }
+    },
+    {
+      "name": "产品类别销售额（柱状图）",
+      "description": "按产品类别统计销售额，使用柱状图对比",
+      "config": {
+        "collection": "products",
+        "chartType": "bar",
+        "metricType": "sum",
+        "metricField": "sales_amount",
+        "groupBy": "category",
+        "colorScheme": "dark",
+        "title": "产品类别销售额统计",
+        "showLegend": false,
+        "showDataLabels": true,
+        "limit": 15
+      }
+    },
+    {
+      "name": "平均订单金额趋势（折线图）",
+      "description": "按月统计平均订单金额，使用折线图展示变化",
+      "config": {
+        "collection": "orders",
+        "chartType": "line",
+        "metricType": "avg",
+        "metricField": "amount",
+        "groupBy": "month",
+        "colorScheme": "default",
+        "title": "平均订单金额趋势",
+        "showLegend": false,
+        "showDataLabels": true,
+        "limit": 12
+      }
+    }
+  ],
+  "note": "这些示例配置可以根据实际数据集和字段进行调整"
+}

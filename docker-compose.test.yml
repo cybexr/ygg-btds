@@ -1,0 +1,112 @@
+# E2E 测试环境 Docker Compose 配置
+# 基于 Directus v11 + PostgreSQL 16
+# 用于黑盒空库原则的自动化测试
+
+version: '3.8'
+
+services:
+  # PostgreSQL 测试数据库
+  test-db:
+    image: postgres:16-alpine
+    container_name: btdms-test-db
+    environment:
+      POSTGRES_USER: directus
+      POSTGRES_PASSWORD: directus_test_password
+      POSTGRES_DB: btdms_test
+    ports:
+      - "5433:5432"
+    volumes:
+      - test-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U directus"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - test-network
+
+  # Directus 测试实例
+  test-directus:
+    image: directus/directus:11.0.0
+    container_name: btdms-test-directus
+    environment:
+      # 数据库配置
+      DB_CLIENT: pg
+      DB_HOST: test-db
+      DB_PORT: 5432
+      DB_DATABASE: btdms_test
+      DB_USER: directus
+      DB_PASSWORD: directus_test_password
+
+      # Directus 管理员配置
+      ADMIN_EMAIL: admin@test.btdms.local
+      ADMIN_PASSWORD: admin_test_password
+
+      # Directus 公共配置
+      PUBLIC_URL: http://localhost:8080
+      KEY: test_secret_key_change_in_production_min_32_chars
+
+      # 测试环境配置
+      LOG_LEVEL: info
+      CACHE_ENABLED: false
+      ASSETS_ACCESS_TTL: 300s
+
+      # 扩展路径（映射本地扩展）
+      EXTENSIONS_PATH: /extensions
+
+    ports:
+      - "8080:8055"
+    volumes:
+      - ./extensions:/extensions
+      - test-uploads:/directus/uploads
+      - test-database-snapshot:/directus/database
+    depends_on:
+      test-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8055/health"]
+      interval: 5s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    networks:
+      - test-network
+
+  # 数据库初始化服务（一次性任务）
+  test-db-init:
+    image: postgres:16-alpine
+    container_name: btdms-test-db-init
+    environment:
+      PGHOST: test-db
+      PGPORT: 5432
+      PGDATABASE: btdms_test
+      PGUSER: directus
+      PGPASSWORD: directus_test_password
+    volumes:
+      - ./tests/scripts/init-test-db.sql:/init-test-db.sql:ro
+    depends_on:
+      test-db:
+        condition: service_healthy
+    command: >
+      sh -c '
+        echo "Waiting for database to be ready..." &&
+        sleep 5 &&
+        psql -f /init-test-db.sql &&
+        echo "Database initialization completed successfully"
+      '
+    networks:
+      - test-network
+
+# 网络配置
+networks:
+  test-network:
+    driver: bridge
+
+# 数据卷配置
+volumes:
+  test-db-data:
+    driver: local
+  test-uploads:
+    driver: local
+  test-database-snapshot:
+    driver: local

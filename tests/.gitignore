@@ -1,0 +1,26 @@
+# E2E 测试相关文件
+test-results/
+playwright-report/
+playwright/.cache/
+
+# 测试资产（生成的文件）
+assets/mock_data/*.xlsx
+assets/mock_data/*.xls
+
+# Node modules
+node_modules/
+
+# 环境变量
+.env.local
+.env.test.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db

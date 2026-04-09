@@ -1,0 +1,47 @@
+{
+	"name": "bt-system-bundle",
+	"version": "1.0.0",
+	"description": "BT Dataset Management System - Core Bundle Extension",
+	"directus:extension": {
+		"type": "bundle",
+		"path": "dist/index.js",
+		"source": "src/index.ts",
+		"host": "^11.0.0"
+	},
+	"exports": {
+		".": "./src/index.ts",
+		"./src/*": "./src/*"
+	},
+	"scripts": {
+		"build": "directus-extension build",
+		"dev": "directus-extension build -w",
+		"test": "vitest",
+		"test:ui": "vitest --ui",
+		"test:coverage": "vitest --coverage"
+	},
+	"devDependencies": {
+		"@directus/extensions-sdk": "11.0.1",
+		"@testing-library/jest-dom": "^6.6.5",
+		"@testing-library/vue": "^8.0.3",
+		"@vitejs/plugin-vue": "^5.2.3",
+		"@vitest/ui": "^4.1.3",
+		"happy-dom": "^16.7.3",
+		"jsdom": "^26.0.3",
+		"typescript": "^5.3.3",
+		"vitest": "^4.1.3",
+		"vue": "^3.4.15"
+	},
+	"keywords": [
+		"directus",
+		"extension",
+		"bundle",
+		"dataset",
+		"management"
+	],
+	"author": "",
+	"license": "MIT",
+	"dependencies": {
+		"echarts": "5.4.0",
+		"xlsx": "0.18.5"
+	}
+}

@@ -1,0 +1,7 @@
+.ccw/
+.workflow/
+.agent/
+.claude/
+
+# ts
+node_modules/
