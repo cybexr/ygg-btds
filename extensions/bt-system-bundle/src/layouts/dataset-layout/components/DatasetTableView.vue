@@ -47,7 +47,9 @@
 						v-tooltip="'编辑'"
 						icon
 						x-small
-						aria-label="编辑项目"
+						:loading="isRowLoading(getPrimaryKey(item), 'edit')"
+					:disabled="isRowLoading(getPrimaryKey(item), 'edit') || isRowLoading(getPrimaryKey(item), 'delete')"
+					aria-label="编辑项目"
 						@click="handleEdit(item)"
 					>
 						<template #icon>
@@ -58,8 +60,10 @@
 						v-tooltip="'删除'"
 						icon
 						x-small
-						class="danger-action"
-						aria-label="删除项目"
+						:loading="isRowLoading(getPrimaryKey(item), 'delete')"
+					:disabled="isRowLoading(getPrimaryKey(item), 'edit') || isRowLoading(getPrimaryKey(item), 'delete')"
+					class="danger-action"
+					aria-label="删除项目"
 						@click="handleDelete(item)"
 					>
 						<template #icon>
@@ -98,11 +102,16 @@
 				@update:page="handlePageChange"
 			/>
 		</div>
+
+		<!-- Feedback Toast -->
+		<v-toast v-model="toast.show" :type="toast.type">
+			{{ toast.message }}
+		</v-toast>
 	</div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue';
+import { ref, computed, watch, onBeforeUnmount } from 'vue';
 import { useDebounceFn } from '@vueuse/core';
 import type { Field } from '@directus/types';
 
@@ -145,8 +154,56 @@ const currentPage = ref(1);
 const sortField = ref<{ field: string; order: 'asc' | 'desc' } | null>(null);
 const selection = ref<Set<string | number>>(new Set());
 
+// Row-level loading state management
+interface RowLoadingState {
+	edit: boolean;
+	delete: boolean;
+}
+
+const rowLoadingStates = ref<Map<string | number, RowLoadingState>>(new Map());
+
+// Toast feedback state
+const toast = ref({
+	show: false,
+	message: '',
+	type: 'success' as 'success' | 'error' | 'warning' | 'info'
+});
+
 // Constants
 const PAGE_SIZE = props.itemsPerPage;
+
+// Row loading state helper functions
+const setRowLoading = (rowKey: string | number, action: 'edit' | 'delete', loading: boolean) => {
+	if (!rowLoadingStates.value.has(rowKey)) {
+		rowLoadingStates.value.set(rowKey, { edit: false, delete: false });
+	}
+	const state = rowLoadingStates.value.get(rowKey);
+	if (state) {
+		state[action] = loading;
+	}
+};
+
+const isRowLoading = (rowKey: string | number, action: 'edit' | 'delete'): boolean => {
+	const state = rowLoadingStates.value.get(rowKey);
+	return state ? state[action] : false;
+};
+
+const clearRowLoadingStates = () => {
+	rowLoadingStates.value.clear();
+};
+
+// Toast helper function
+const showToast = (message: string, type: 'success' | 'error' | 'warning' | 'info' = 'success') => {
+	toast.value = {
+		show: true,
+		message,
+		type
+	};
+
+	setTimeout(() => {
+		toast.value.show = false;
+	}, 3000);
+};
 
 // Computed
 const tableColumns = computed<TableColumn[]>(() => {
@@ -249,17 +306,35 @@ const handleRowClick = (item: TableItem) => {
 };
 
 const handleEdit = (item: TableItem) => {
+	const rowKey = getPrimaryKey(item);
+	setRowLoading(rowKey, 'edit', true);
+
 	emit('update:options', {
 		action: 'edit',
-		item: getPrimaryKey(item),
+		item: rowKey,
 	});
+
+	// Simulate async operation completion (in real scenario, parent component would handle this)
+	setTimeout(() => {
+		setRowLoading(rowKey, 'edit', false);
+		showToast('编辑操作已完成', 'success');
+	}, 500);
 };
 
 const handleDelete = (item: TableItem) => {
+	const rowKey = getPrimaryKey(item);
+	setRowLoading(rowKey, 'delete', true);
+
 	emit('update:options', {
 		action: 'delete',
-		item: getPrimaryKey(item),
+		item: rowKey,
 	});
+
+	// Simulate async operation completion (in real scenario, parent component would handle this)
+	setTimeout(() => {
+		setRowLoading(rowKey, 'delete', false);
+		showToast('删除操作已完成', 'success');
+	}, 500);
 };
 
 const handleSortChange = (sort: { field: string; order: 'asc' | 'desc' } | null) => {
@@ -280,6 +355,11 @@ watch(totalPages, (newTotalPages, oldTotalPages) => {
 	if (newTotalPages > 0 && currentPage.value > newTotalPages) {
 		currentPage.value = newTotalPages;
 	}
+});
+
+// Cleanup on component unmount
+onBeforeUnmount(() => {
+	clearRowLoadingStates();
 });
 </script>
 
@@ -343,6 +423,35 @@ watch(totalPages, (newTotalPages, oldTotalPages) => {
 	justify-content: center;
 	padding: 16px;
 	background-color: var(--background-normal);
+	border-top: 1px solid var(--border-normal);
+}
+
+.danger-action {
+	color: var(--danger);
+}
+
+.danger-action:hover {
+	background-color: var(--danger-10);
+}
+
+/* Responsive Design */
+@media (max-width: 1024px) {
+	.table-controls {
+		flex-direction: column;
+		align-items: stretch;
+	}
+
+	.search-box {
+		max-width: none;
+	}
+
+	.table-info {
+		justify-content: space-between;
+	}
+}
+</style>
+
+ackground-color: var(--background-normal);
 	border-top: 1px solid var(--border-normal);
 }
 
