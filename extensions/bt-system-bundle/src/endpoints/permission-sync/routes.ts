@@ -287,6 +287,17 @@ function validateSyncRequest(request: any): PermissionValidationError[] {
 				code: 'INVALID_TYPE',
 			});
 		}
+
+		// 当权限启用时，role_id 必须存在且有效
+		if (permission.enabled === true) {
+			if (!permission.role_id || permission.role_id.toString().trim() === '') {
+				errors.push({
+					field: `user_library_permissions[${index}].role_id`,
+					message: 'role_id 是启用权限的必填字段，必须引用 directus_roles.id',
+					code: 'REQUIRED_FIELD',
+				});
+			}
+		}
 	});
 
 	return errors;

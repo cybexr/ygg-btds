@@ -129,5 +129,31 @@ describe('Permission Sync API', () => {
 			expect(permission.template).toBeDefined();
 			expect(typeof permission.enabled).toBe('boolean');
 		});
+
+		it('应该要求启用的权限提供 role_id', () => {
+			const enabledPermission = {
+				user_id: 'test_user',
+				library_id: 'test_library',
+				template: PermissionTemplate.DESCRIPTOR_CRUD,
+				enabled: true,
+				role_id: '12',
+			};
+
+			expect(enabledPermission.enabled).toBe(true);
+			expect(enabledPermission.role_id).toBeDefined();
+			expect(enabledPermission.role_id).toBeTruthy();
+		});
+
+		it('应该允许未启用的权限不提供 role_id', () => {
+			const disabledPermission = {
+				user_id: 'test_user',
+				library_id: 'test_library',
+				template: PermissionTemplate.DESCRIPTOR_CRUD,
+				enabled: false,
+			};
+
+			expect(disabledPermission.enabled).toBe(false);
+			expect(disabledPermission.role_id).toBeUndefined();
+		});
 	});
 });
