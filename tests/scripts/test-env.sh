@@ -72,6 +72,11 @@ env_clean() {
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         echo -e "${YELLOW}🧹 清理测试环境...${NC}"
+        # 防御性路径校验，防止灾难性删除
+        if [ -z "$DB_DIR" ] || [ "$DB_DIR" = "/" ] || [ "$DB_DIR" = "/*" ]; then
+            echo -e "${RED}❌ 错误: 无效的数据库目录路径: '$DB_DIR'${NC}"
+            exit 1
+        fi
         rm -rf "$DB_DIR"
         echo -e "${GREEN}✅ 测试环境已清理${NC}"
     else

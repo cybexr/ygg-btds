@@ -167,7 +167,7 @@ describe('Excel 解析器错误处理测试', () => {
 		});
 
 		it('应该保留大文本单元格内容', async () => {
-			const largeValue = 'x'.repeat(32 * 1024);
+			const largeValue = 'x'.repeat(32000);
 			const buffer = createWorkbookBuffer([
 				['description'],
 				[largeValue],
@@ -331,6 +331,10 @@ describe('Excel 解析器错误处理测试', () => {
 
 			const validBuffer = createMultiSheetWorkbook(2);
 			await expect(getSheetNames(validBuffer)).resolves.toEqual(['Sheet1', 'Sheet2']);
+		});
+	});
+});
+)).resolves.toEqual(['Sheet1', 'Sheet2']);
 		});
 	});
 });
