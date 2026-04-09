@@ -450,32 +450,3 @@ onBeforeUnmount(() => {
 	}
 }
 </style>
-
-ackground-color: var(--background-normal);
-	border-top: 1px solid var(--border-normal);
-}
-
-.danger-action {
-	color: var(--danger);
-}
-
-.danger-action:hover {
-	background-color: var(--danger-10);
-}
-
-/* Responsive Design */
-@media (max-width: 1024px) {
-	.table-controls {
-		flex-direction: column;
-		align-items: stretch;
-	}
-
-	.search-box {
-		max-width: none;
-	}
-
-	.table-info {
-		justify-content: space-between;
-	}
-}
-</style>

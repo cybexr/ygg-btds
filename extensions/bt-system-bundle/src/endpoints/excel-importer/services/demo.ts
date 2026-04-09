@@ -86,7 +86,7 @@ export async function demoSimpleImport(database: Knex): Promise<void> {
 	// 7. 查看性能指标
 	const metrics = runner.getPerformanceMetrics(jobId);
 	if (metrics) {
-		console.log(console.log("\n========== 性能指标 ==========");
+			console.log('\n========== 性能指标 ==========');
 		console.log(`平均批处理时间: ${metrics.averageBatchTime}ms`);
 		console.log(`总执行时间: ${metrics.totalDuration}ms`);
 	}
