@@ -3,7 +3,7 @@
 # E2E 测试环境管理脚本
 # 用于快速启动、停止和管理测试环境（SQLite 版本）
 
-set -e
+set -euo pipefail
 
 # 颜色定义
 RED='\033[0;31m'
@@ -18,12 +18,51 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 # 配置
 DB_DIR="$PROJECT_ROOT/data"
-DB_FILE="$DB_DIR/btdms_test.db"
 
 echo -e "${BLUE}========================================${NC}"
 echo -e "${BLUE}BTDMS E2E 测试环境管理 (SQLite)${NC}"
 echo -e "${BLUE}========================================${NC}"
 echo ""
+
+# 路径验证函数
+validate_safe_path() {
+    local path="$1"
+    local path_name="${2:-路径}"
+
+    # 检查路径是否为空
+    if [ -z "$path" ]; then
+        echo -e "${RED}❌ 错误: ${path_name}为空${NC}" >&2
+        return 1
+    fi
+
+    # 检查路径是否为根目录或危险路径
+    case "$path" in
+        "/"|"/home"|"~"|"/home/*")
+            echo -e "${RED}❌ 错误: ${path_name}指向系统目录: $path${NC}" >&2
+            return 1
+            ;;
+    esac
+
+    # 检查路径是否包含路径穿越攻击
+    if [[ "$path" == *".."* ]] || [[ "$path" == *"%2e"* ]] || [[ "$path" == *"%2E"* ]]; then
+        echo -e "${RED}❌ 错误: ${path_name}包含路径穿越字符: $path${NC}" >&2
+        return 1
+    fi
+
+    # 检查路径是否在项目根目录内
+    local resolved_path
+    resolved_path="$(cd "$path" 2>/dev/null && pwd)" || {
+        echo -e "${RED}❌ 错误: ${path_name}无法解析: $path${NC}" >&2
+        return 1
+    }
+
+    if [[ "$resolved_path" != "$PROJECT_ROOT"* ]]; then
+        echo -e "${RED}❌ 错误: ${path_name}不在项目根目录内: $resolved_path${NC}" >&2
+        return 1
+    fi
+
+    return 0
+}
 
 # 帮助信息
 show_help() {
@@ -48,8 +87,13 @@ env_setup() {
 
     # 创建 .env.test.local（如果不存在）
     ENV_FILE="$PROJECT_ROOT/tests/.env.test.local"
+    ENV_EXAMPLE="$PROJECT_ROOT/tests/.env.example"
     if [ ! -f "$ENV_FILE" ]; then
-        cp "$PROJECT_ROOT/tests/.env.example" "$ENV_FILE"
+        if [ ! -f "$ENV_EXAMPLE" ]; then
+            echo -e "${RED}❌ 错误: 配置模板文件不存在: $ENV_EXAMPLE${NC}"
+            exit 1
+        fi
+        cp "$ENV_EXAMPLE" "$ENV_FILE"
         echo -e "${GREEN}✅${NC} 测试环境配置已创建: $ENV_FILE"
     else
         echo -e "${YELLOW}ℹ️${NC} 测试环境配置已存在: $ENV_FILE"
@@ -67,6 +111,11 @@ env_verify() {
 
 # 清理环境
 env_clean() {
+    # 验证 DB_DIR 路径安全性
+    if ! validate_safe_path "$DB_DIR" "数据目录"; then
+        exit 1
+    fi
+
     echo -e "${RED}⚠️  警告: 这将删除所有测试数据${NC}"
     read -p "确定要清理吗? (y/N): " -n 1 -r
     echo
@@ -82,6 +131,12 @@ env_clean() {
 # 运行测试
 env_test() {
     echo -e "${BLUE}🧪 运行 E2E 测试...${NC}"
+
+    # 检查依赖
+    if ! command -v curl >/dev/null 2>&1; then
+        echo -e "${RED}❌ 错误: 需要安装 curl 命令${NC}" >&2
+        exit 1
+    fi
 
     # 检查环境
     BASE_URL="${TEST_BASE_URL:-http://localhost:8055}"
