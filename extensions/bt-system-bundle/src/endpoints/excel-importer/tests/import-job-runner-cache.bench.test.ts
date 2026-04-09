@@ -22,7 +22,9 @@ function createMockQuery(database: MockDatabase, table: string, stats: { selects
 				return nextRow;
 			});
 
-			return Promise.resolve(inserted.map((row) => ({ id: row.id })));
+			const promise = Promise.resolve(inserted.map((row) => ({ id: row.id }))) as any;
+			promise.returning = () => promise;
+			return promise;
 		},
 		where(field: string, value: any) {
 			predicate = (item: MockRow) => item[field] === value;

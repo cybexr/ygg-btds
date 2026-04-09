@@ -3,7 +3,7 @@
  * 测试动态建表与数据集注册的完整流程
  */
 
-import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import knex from 'knex';
 import { SchemaBuilder } from '../schema-builder';
 import { RegistryService, DatasetRegistration } from '../registry-service';

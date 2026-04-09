@@ -8,8 +8,8 @@ import {
 	createFieldMappings,
 	adjustFieldMapping,
 	adjustFieldMappings,
-	FieldType,
 } from '../type-inference';
+import { FieldType } from '../../types';
 
 describe('类型推断服务', () => {
 	describe('inferFieldType', () => {
