@@ -9,7 +9,7 @@ import { randomUUID } from 'crypto';
 import { parseExcelFile } from './services/excel-parser';
 import { SchemaBuilder } from './services/schema-builder';
 import { ImportJobRunner } from './services/import-job-runner';
-import { ExcelImportService } from '../../shared/services/excel-import-service';
+import { ExcelImportService } from './services/excel-import-service';
 
 const excelService = new ExcelImportService();
 const virusScanner = createVirusScanner();

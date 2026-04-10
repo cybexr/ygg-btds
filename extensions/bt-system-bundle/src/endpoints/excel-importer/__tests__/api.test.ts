@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { ExcelImportService } from '../../../shared/services/excel-import-service';
+import { ExcelImportService } from '../services/excel-import-service';
 import { TaskStatus } from '../types';
 import { createUploadHandler } from '../routes';
 

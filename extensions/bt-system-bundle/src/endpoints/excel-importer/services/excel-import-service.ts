@@ -9,7 +9,7 @@ import {
 	FieldMapping,
 	TaskInfo,
 	TaskStatus,
-} from '../../endpoints/excel-importer/types';
+} from '../types';
 
 /** @deprecated 请使用 ImportJobRunner 和 parseExcelFile 代替 */
 export class ExcelImportService {
