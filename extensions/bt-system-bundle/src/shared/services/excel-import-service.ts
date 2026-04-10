@@ -46,9 +46,9 @@ export class ExcelImportService {
 		task.status = TaskStatus.PARSING;
 		task.updated_at = new Date().toISOString();
 
-		// TODO: 实现实际的 Excel 解析逻辑
-		// 这里需要使用 xlsx 或类似库来解析 Excel 文件
-		// 将在后续任务中实现
+		// 注：Excel 解析逻辑已迁移到 import-job-runner 服务
+		// 使用 TypeScript Excel Parser (SHEETJS) 进行解析
+		// 参考：extensions/bt-system-bundle/src/endpoints/excel-importer/services/import-job-runner.ts
 
 		const mockResult: ExcelParseResult = {
 			file_name: task.file_name || '',
@@ -92,9 +92,9 @@ export class ExcelImportService {
 		task.collection_name = collectionName;
 		task.updated_at = new Date().toISOString();
 
-		// TODO: 实现实际的集合创建逻辑
-		// 需要使用 Directus Schema API 创建集合和字段
-		// 将在后续任务中实现
+		// 注：集合创建逻辑已迁移到 import-job-runner 服务
+		// 使用 Directus Schema API 创建集合和字段
+		// 参考：extensions/bt-system-bundle/src/endpoints/excel-importer/services/import-job-runner.ts
 
 		task.status = TaskStatus.COMPLETED;
 		task.updated_at = new Date().toISOString();

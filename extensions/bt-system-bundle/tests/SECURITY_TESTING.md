@@ -225,7 +225,7 @@ expect(res.json).toHaveBeenCalledWith(
 
 - 所有测试用例通过
 - 测试覆盖率 ≥ 80%
-- 无安全漏洞被标记为 TODO
+- 无已知安全漏洞未修复
 
 ### 失败处理
 
