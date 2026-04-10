@@ -8,8 +8,11 @@ export default defineConfig({
   // 测试文件位置
   testDir: './',
 
-  // 测试文件匹配模式
+  // 测试文件匹配模式（只匹配 .spec.ts 文件）
   testMatch: '**/*.spec.ts',
+
+  // 排除性能测试文件
+  testIgnore: '**/*.perf.test.ts',
 
   // 完全并行运行测试（每个测试文件独立运行）
   fullyParallel: true,
@@ -86,10 +89,10 @@ export default defineConfig({
   ],
 
   // 测试运行前的全局设置
-  globalSetup: require.resolve('./global-setup'),
+  globalSetup: './global-setup.ts',
 
   // 测试运行后的全局清理
-  globalTeardown: require.resolve('./global-teardown'),
+  globalTeardown: './global-teardown.ts',
 
   // 开发服务器（可选，用于本地开发）
   // webServer: {

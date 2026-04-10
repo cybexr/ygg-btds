@@ -12,6 +12,10 @@ node_modules/
 *.db-wal
 /data/
 
+# 环境变量（含密钥，不提交）
+.env
+.env.local
+
 # 测试相关
 test-results/
 /playwright-report/
