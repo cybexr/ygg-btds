@@ -1,11 +1,51 @@
 {
 	"name": "bt-system-bundle",
+	"type": "module",
 	"version": "1.0.0",
 	"description": "BT Dataset Management System - Core Bundle Extension",
 	"directus:extension": {
 		"type": "bundle",
-		"path": "dist/index.js",
-		"source": "src/index.ts",
+		"path": {
+			"app": "dist/index.js",
+			"api": "dist/index.js"
+		},
+		"entries": [
+			{
+				"type": "endpoint",
+				"name": "excel-importer",
+				"source": "src/endpoints/excel-importer/index.ts"
+			},
+			{
+				"type": "endpoint",
+				"name": "permission-sync",
+				"source": "src/endpoints/permission-sync/index.ts"
+			},
+			{
+				"type": "hook",
+				"name": "import-validator",
+				"source": "src/hooks/import-validator/index.ts"
+			},
+			{
+				"type": "module",
+				"name": "raw-database-manager",
+				"source": "src/modules/raw-database-manager/index.ts"
+			},
+			{
+				"type": "module",
+				"name": "user-manager",
+				"source": "src/modules/user-manager/index.ts"
+			},
+			{
+				"type": "layout",
+				"name": "dataset-layout",
+				"source": "src/layouts/dataset-layout/index.ts"
+			},
+			{
+				"type": "panel",
+				"name": "basic-charts-pack",
+				"source": "src/panels/basic-charts-pack/index.ts"
+			}
+		],
 		"host": "^11.0.0"
 	},
 	"exports": {
@@ -21,7 +61,7 @@
 		"test:coverage": "vitest --coverage"
 	},
 	"devDependencies": {
-		"@directus/extensions-sdk": "11.0.1",
+		"@directus/extensions-sdk": "^17.1.2",
 		"@testing-library/jest-dom": "^6.6.5",
 		"@testing-library/vue": "^8.0.3",
 		"@types/supertest": "^7.2.0",

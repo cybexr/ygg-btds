@@ -206,7 +206,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue';
-import { useApi, useStores } from '@directus/extensions-sdk';
+import { useApi } from '@directus/extensions-sdk';
 import { useCollectionValidation } from './composables/useCollectionValidation';
 import type { Field } from '@directus/types';
 
@@ -231,8 +231,6 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<Emits>();
 
 const api = useApi();
-const { useFieldsStore } = useStores();
-const fieldsStore = useFieldsStore();
 const collectionValidation = useCollectionValidation();
 
 const viewMode = ref<'table' | 'card'>('table');
@@ -252,8 +250,9 @@ const collectionError = computed(() => collectionValidation.validationError.valu
 const filterableFields = computed(() => {
 	return props.fields
 		.filter((field) => {
-			const fieldMeta = fieldsStore.getField(props.collection, field.field);
-			return fieldMeta?.type !== 'json' && !fieldMeta?.schema?.is_nullable;
+			// Simplified filter - exclude json fields based on type info from props
+			const fieldType = field.meta?.type || field.type;
+			return fieldType !== 'json';
 		})
 		.map((field) => ({
 			text: field.name || field.field,

@@ -129,7 +129,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
-import { useApi, useStores } from '@directus/extensions-sdk';
+import { useApi } from '@directus/extensions-sdk';
 import DatasetTableView from './components/DatasetTableView.vue';
 import { useCollectionValidation } from '../composables/useCollectionValidation';
 import type { Field } from '@directus/types';
@@ -155,8 +155,6 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<Emits>();
 
 const api = useApi();
-const { useFieldsStore } = useStores();
-const fieldsStore = useFieldsStore();
 const collectionValidation = useCollectionValidation();
 
 const viewMode = ref<'table' | 'card'>('table');

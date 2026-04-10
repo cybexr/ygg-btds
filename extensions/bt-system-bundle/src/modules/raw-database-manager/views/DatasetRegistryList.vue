@@ -294,7 +294,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
-import { useApi, useUserStore } from '@directus/extensions-sdk';
+import { useApi } from '@directus/extensions-sdk';
 
 interface Dataset {
 	id: number;
@@ -318,7 +318,8 @@ interface TableColumn {
 }
 
 const api = useApi();
-const userStore = useUserStore();
+const currentUserId = ref<string | null>(null);
+const currentUserRole = ref<string | null>(null);
 
 const datasets = ref<Dataset[]>([]);
 const loading = ref(false);
@@ -374,12 +375,23 @@ const tableColumns: TableColumn[] = [
 ];
 
 const hasDsManagerRole = computed(() => {
-	const user = userStore.currentUser;
-	if (!user || !user.role) return false;
-
-	const roleName = user.role.name || user.role;
+	const roleName = currentUserRole.value;
+	if (!roleName) return false;
 	return roleName === 'ds-manager' || roleName === 'Administrator';
 });
+
+// Fetch current user info on mount
+const fetchCurrentUser = async () => {
+	try {
+		const response = await api.get('/users/me', {
+			fields: ['id', 'role.name', 'role']
+		});
+		currentUserId.value = response.data.data.id;
+		currentUserRole.value = response.data.data.role?.name || response.data.data.role;
+	} catch {
+		// Silently fail - user info not available
+	}
+};
 
 let confirmCountdownTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -721,6 +733,7 @@ const confirmButtonLabel = (label: string) => {
 };
 
 onMounted(() => {
+	fetchCurrentUser();
 	fetchDatasets();
 });
 
