@@ -11,6 +11,7 @@ import {
 	TaskStatus,
 } from '../../endpoints/excel-importer/types';
 
+/** @deprecated 请使用 ImportJobRunner 和 parseExcelFile 代替 */
 export class ExcelImportService {
 	private tasks: Map<string, TaskInfo> = new Map();
 
