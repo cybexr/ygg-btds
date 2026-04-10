@@ -50,7 +50,7 @@ describe('DatasetTableView', () => {
 	describe('搜索功能', () => {
 		it('应该根据搜索词过滤项目', async () => {
 			const wrapper = createWrapper();
-			await wrapper.vm.searchQuery = 'Alice';
+			wrapper.vm.searchQuery = 'Alice';
 			await wrapper.vm.onSearchChange();
 
 			expect(wrapper.vm.filteredAndSortedItems).toHaveLength(1);
@@ -59,7 +59,7 @@ describe('DatasetTableView', () => {
 
 		it('应该在所有字段中搜索', async () => {
 			const wrapper = createWrapper();
-			await wrapper.vm.searchQuery = 'example';
+			wrapper.vm.searchQuery = 'example';
 			await wrapper.vm.onSearchChange();
 
 			expect(wrapper.vm.filteredAndSortedItems).toHaveLength(3);
@@ -68,7 +68,7 @@ describe('DatasetTableView', () => {
 		it('应该重置分页到第一页当搜索改变时', async () => {
 			const wrapper = createWrapper();
 			wrapper.vm.currentPage = 2;
-			await wrapper.vm.searchQuery = 'test';
+			wrapper.vm.searchQuery = 'test';
 			await wrapper.vm.onSearchChange();
 
 			expect(wrapper.vm.currentPage).toBe(1);

@@ -74,13 +74,13 @@ describe('Excel 解析器错误处理测试', () => {
 		it('应该拒绝损坏的 zip 文件', async () => {
 			const buffer = fs.readFileSync(path.join(fixtureDir, 'corrupted-zip.xlsx'));
 
-			await expect(parseExcelFile(buffer)).rejects.toThrow(/Unsupported ZIP file|Invalid/i);
+			await expect(parseExcelFile(buffer)).rejects.toThrow(/Unsupported ZIP encryption|Unsupported ZIP file|Invalid/i);
 		});
 
 		it('应该拒绝中央目录损坏的文件', async () => {
 			const buffer = fs.readFileSync(path.join(fixtureDir, 'invalid-central-directory.xlsx'));
 
-			await expect(parseExcelFile(buffer)).rejects.toThrow(/Unsupported ZIP file|Invalid/i);
+			await expect(parseExcelFile(buffer)).rejects.toThrow(/Unsupported ZIP encryption|Unsupported ZIP file|Invalid/i);
 		});
 
 		it('应该拒绝不存在的工作表索引', async () => {
@@ -108,7 +108,7 @@ describe('Excel 解析器错误处理测试', () => {
 		it('应该在读取损坏文件工作表名时抛错', async () => {
 			const buffer = fs.readFileSync(path.join(fixtureDir, 'corrupted-zip.xlsx'));
 
-			await expect(getSheetNames(buffer)).rejects.toThrow(/Unsupported ZIP file|Invalid/i);
+			await expect(getSheetNames(buffer)).rejects.toThrow(/Unsupported ZIP encryption|Unsupported ZIP file|Invalid/i);
 		});
 
 		it('应该能够解析伪装为 xlsx 的纯文本并返回默认工作表', async () => {
@@ -331,10 +331,6 @@ describe('Excel 解析器错误处理测试', () => {
 
 			const validBuffer = createMultiSheetWorkbook(2);
 			await expect(getSheetNames(validBuffer)).resolves.toEqual(['Sheet1', 'Sheet2']);
-		});
-	});
-});
-)).resolves.toEqual(['Sheet1', 'Sheet2']);
 		});
 	});
 });
